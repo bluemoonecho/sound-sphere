@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sound Sphere - MIDI Sound & Visual Platform</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="p5-container"></div>
+    <div id="ui-panel" class="ui-panel">
+      <div class="header">
+        <h1>Sound Sphere</h1>
+        <p class="subtitle">MIDI-Driven Sound & Visuals</p>
+      </div>
+      <div class="controls">
+        <div class="control-group">
+          <label for="midi-select">MIDI Input:</label>
+          <select id="midi-select">
+            <option value="">-- No device selected --</option>
+          </select>
+          <span id="midi-status" class="status disconnected">Disconnected</span>
+        </div>
+        <div class="control-group">
+          <label for="animation-select">Animation Type:</label>
+          <select id="animation-select">
+            <option value="0">Radiating Circles</option>
+            <option value="1">Particle Burst</option>
+            <option value="2">Wave Pattern</option>
+            <option value="3">Expanding Rectangles</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <button id="save-session">Save Session</button>
+          <button id="load-session">Load Session</button>
+          <button id="clear-session">Clear</button>
+        </div>
+      </div>
+      <div class="info">
+        <p id="midi-info">Connect a MIDI keyboard to get started</p>
+        <p id="note-info"></p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
