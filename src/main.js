@@ -29,7 +29,7 @@ class SoundSphere {
     this.sessionManager = new SessionManager();
 
     this.uiState = {
-      currentAnimationType: 0,
+      currentAnimationType: -1,
       warningState: 'none',
       activeSource: INPUT_SOURCE_TYPES.KEYBOARD,
       midiSelected: false
@@ -459,7 +459,7 @@ class SoundSphere {
 
     const animSelect = document.getElementById('animation-select');
     if (animSelect) {
-      animSelect.value = '0';
+      animSelect.value = '-1';
     }
   }
 }

@@ -47,3 +47,18 @@
 - Alternatives considered:
   - Require full automated tests before planning completion: rejected because it blocks plan generation and exceeds this command's scope.
   - Skip explicit validation guidance: rejected because measurable success criteria require a reproducible runbook.
+
+## Decision 7: Visual Aesthetic Direction
+
+- Decision: Adopt an experimental retro aesthetic — dark phosphor-green canvas, glyph-centric animation modes, and a monospace terminal-style UI panel.
+- Rationale: Differentiates the product visually and directly responds to the stated design intent (experimental, alphabet-letter motifs, retro look). Using musical note names (A–G) as central visual elements reinforces the audio-visual connection and gives each note a distinct identity.
+- Visual modes replaced/renamed:
+  - **GlyphBurst** (was Radiating Circles): note-name letter at center + alphanumeric particle burst.
+  - **ScanlineRipple** (was Particle Burst): CRT-style horizontal scanlines rippling from impact center.
+  - **RetroVector** (was Wave Pattern): expanding wireframe polygons with letter characters at vertices.
+  - **LetterStamp** (was Expanding Rectangles): large note-name letter stamps down with fragment scatter.
+- UI panel: monospace font (`Courier New` / system monospace), near-black background (`#0d0d0d`), phosphor-green (`#39ff14`) accent for text, borders, and interactive controls.
+- Canvas background: changed from white to near-black (`HSB(0, 0, 5)`) to match phosphor aesthetic; all visual elements recolored accordingly.
+- Alternatives considered:
+  - Keep white background and add color: rejected because the retro phosphor feel requires a dark field.
+  - Use color-per-note (full HSB spectrum): deferred; monochrome phosphor green is more cohesive for the retro look and can be revisited.

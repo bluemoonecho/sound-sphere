@@ -126,6 +126,25 @@
 
 ---
 
+## Phase 8: Retro / Experimental Visual Aesthetic
+
+**Purpose**: Replace generic animation modes with glyph-centric, experimental retro visuals and restyle the UI panel to match a phosphor-terminal aesthetic per Decision 7 in `research.md`.
+
+**Goal**: All four visual modes display alphabetic/typographic characters as primary graphic elements on a dark canvas; the UI panel uses monospace font and phosphor-green color scheme throughout.
+
+**Independent Test**: Open app, cycle through all four animation modes by playing notes, and confirm glyph-driven output on dark canvas; inspect UI panel for monospace font, dark background, and phosphor-green accents.
+
+### Implementation for Phase 8
+
+- [X] T036 [P] Replace all four animation classes in `src/visual/P5Sketch.js` with `GlyphBurst`, `ScanlineRipple`, `RetroVector`, and `LetterStamp`; change canvas background from white to near-black
+- [X] T037 [P] Update animation type names in `index.html` select options to match new class names
+- [X] T038 [P] Restyle `src/style.css` with monospace font, dark background, phosphor-green accent, and scanline overlay on canvas
+- [X] T039 Update `specs/001-sound-sphere-spec/spec.md` and `specs/001-sound-sphere-spec/research.md` with visual aesthetic requirements and design decision
+
+**Checkpoint**: Visual modes are retro/experimental with glyph motifs; UI panel is consistently styled in terminal theme.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

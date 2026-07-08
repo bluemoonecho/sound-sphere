@@ -174,7 +174,7 @@ export class SessionManager {
 
     return {
       version,
-      animationType: Number.isInteger(state.animationType) ? state.animationType : 0,
+      animationType: Number.isInteger(state.animationType) ? state.animationType : -1,
       patternSet: typeof state.patternSet === 'string' ? state.patternSet : 'default',
       midiDeviceId: typeof state.midiDeviceId === 'string' ? state.midiDeviceId : null,
       activeSource: state.activeSource === 'midi' ? 'midi' : 'keyboard',
@@ -200,7 +200,7 @@ export class SessionManager {
   getDefaultState() {
     return {
       version: this.schemaVersion,
-      animationType: 0,
+      animationType: -1,
       patternSet: 'default',
       midiDeviceId: null,
       activeSource: 'keyboard',

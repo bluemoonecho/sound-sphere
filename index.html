@@ -13,7 +13,7 @@
       <div id="input-warning" class="input-warning" role="status" aria-live="polite"></div>
       <div class="header">
         <h1>Sound Sphere</h1>
-        <p class="subtitle">MIDI-Driven Sound & Visuals</p>
+        <p class="subtitle">MIDI / Sound / Visuals</p>
       </div>
       <div class="controls">
         <div class="control-group">
@@ -24,12 +24,13 @@
           <span id="midi-status" class="status disconnected">Disconnected</span>
         </div>
         <div class="control-group">
-          <label for="animation-select">Animation Type:</label>
+          <label for="animation-select">Visual Mode:</label>
           <select id="animation-select">
-            <option value="0">Radiating Circles</option>
-            <option value="1">Particle Burst</option>
-            <option value="2">Wave Pattern</option>
-            <option value="3">Expanding Rectangles</option>
+            <option value="-1" selected>Auto (by Note)</option>
+            <option value="0">Glyph Burst</option>
+            <option value="1">Scanline Ripple</option>
+            <option value="2">Retro Vector</option>
+            <option value="3">Letter Stamp</option>
           </select>
         </div>
         <div class="control-group">

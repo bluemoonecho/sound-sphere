@@ -1,5 +1,5 @@
 /**
- * P5Sketch.js - p5.js sketch for visual rendering
+ * P5Sketch.js - p5.js sketch for visual rendering (2D canvas, B&W retro aesthetic)
  */
 
 import p5 from 'p5';
@@ -10,48 +10,37 @@ export class P5Sketch {
     this.p5Instance = null;
     this.containerSelector = containerSelector;
     this.animations = [];
-    this.currentAnimationType = 0;
-    this.backgroundColor = 0; // Black
-    this.maxAnimations = 8; // Limit simultaneous animations
+    this.currentAnimationType = -1; // -1 = auto (type cycles by midiNote % 4)
+    this.maxAnimations = 8;
     this.animationByKey = new Map();
     this.creationOrder = [];
   }
 
-  /**
-   * Initialize p5.js sketch
-   */
   init() {
     const self = this;
 
     this.sketch = (p) => {
       p.setup = function () {
         const container = document.querySelector(self.containerSelector);
-        const width = window.innerWidth - 300; // Account for sidebar
+        const width = window.innerWidth - 300;
         const height = window.innerHeight;
 
-        p.createCanvas(width, height, p.WEBGL);
+        const canvas = p.createCanvas(width, height); // 2D mode — text works natively
         if (container) {
-          p.canvas.parent(container);
+          canvas.parent(container);
           container.style.position = 'relative';
         }
 
-        p.colorMode(p.HSB, 360, 100, 100, 255);
+        p.colorMode(p.RGB);
         p.angleMode(p.DEGREES);
-        p.textAlign(p.LEFT, p.TOP);
         p.noStroke();
       };
 
       p.draw = function () {
-        p.background(220, 30, 10);
-        p.ambientLight(40, 40, 40);
-        p.directionalLight(200, 200, 255, 0.5, 0.5, -1);
-        p.pointLight(255, 255, 255, 0, 0, 200);
+        p.background(12); // near-black
 
-        // Update and draw animations
         self.updateAnimations(p);
         self.drawAnimations(p);
-
-        // Draw debug info on top
         self.drawDebugInfo(p);
       };
 
@@ -66,17 +55,12 @@ export class P5Sketch {
     return this.p5Instance;
   }
 
-  /**
-   * Update animation states
-   */
   updateAnimations(p) {
     const now = Date.now();
     const toRemove = [];
 
     this.animations.forEach((anim, index) => {
       anim.update(p, now);
-
-      // Remove finished animations
       if (anim.isFinished(now)) {
         if (anim.noteKey) {
           this.animationByKey.delete(anim.noteKey);
@@ -86,37 +70,31 @@ export class P5Sketch {
       }
     });
 
-    // Remove finished animations in reverse order
     for (let i = toRemove.length - 1; i >= 0; i--) {
       this.animations.splice(toRemove[i], 1);
     }
   }
 
-  /**
-   * Draw all animations
-   */
   drawAnimations(p) {
     this.animations.forEach((anim) => {
+      p.push();
+      p.translate(p.width / 2, p.height / 2); // center the origin for all animations
       anim.draw(p);
+      p.pop();
     });
   }
 
-  /**
-   * Draw debug info
-   */
   drawDebugInfo(p) {
     p.push();
-    p.resetMatrix();
-    p.fill(0, 0, 100, 255);
-    p.textSize(12);
-    p.text(`FPS: ${Math.round(p.frameRate())}`, 10, 20);
-    p.text(`Animations: ${this.animations.length}`, 10, 35);
+    p.fill(255, 90);
+    p.noStroke();
+    p.textSize(11);
+    p.textAlign(p.LEFT, p.TOP);
+    p.text(`FPS: ${Math.round(p.frameRate())}`, 10, 10);
+    p.text(`Animations: ${this.animations.length}`, 10, 24);
     p.pop();
   }
 
-  /**
-   * Trigger animation on MIDI note
-   */
   triggerAnimation(midiNote, velocity = 100, noteKey = `note:${midiNote}`) {
     const existing = this.animationByKey.get(noteKey);
     if (existing) {
@@ -137,13 +115,14 @@ export class P5Sketch {
     }
 
     const normalizedVelocity = Math.max(0, Math.min(1, velocity / 127));
-    const animationClass = this.getAnimationClass(this.currentAnimationType);
-    
-    const animation = new animationClass(
-      midiNote,
-      normalizedVelocity,
-      this.p5Instance
-    );
+    // In auto mode (-1), type is determined by the note itself (cycles 0-3 per semitone).
+    // In manual mode (0-3), the selected type overrides.
+    const animType = this.currentAnimationType >= 0
+      ? this.currentAnimationType
+      : midiNote % 4;
+    const animationClass = this.getAnimationClass(animType);
+
+    const animation = new animationClass(midiNote, normalizedVelocity, this.p5Instance);
     animation.noteKey = noteKey;
 
     this.animations.push(animation);
@@ -151,318 +130,388 @@ export class P5Sketch {
     this.creationOrder.push(noteKey);
   }
 
-  /**
-   * Get animation class by type
-   */
   getAnimationClass(type) {
     const AnimationTypes = {
-      0: RadiatingCircles,
-      1: ParticleBurst,
-      2: WavePattern,
-      3: ExpandingRectangles
+      0: GlyphBurst,
+      1: ScanlineRipple,
+      2: RetroVector,
+      3: LetterStamp,
     };
-    return AnimationTypes[type] || RadiatingCircles;
+    return AnimationTypes[type] || GlyphBurst;
   }
 
-  /**
-   * Set animation type (0-3)
-   */
   setAnimationType(type) {
-    this.currentAnimationType = Math.max(0, Math.min(3, type));
+    this.currentAnimationType = Math.max(-1, Math.min(3, type));
   }
 
-  /**
-   * Stop note animation
-   */
   stopNote(midiNote, noteKey = `note:${midiNote}`) {
     const animation = this.animationByKey.get(noteKey);
-    if (!animation) {
-      return;
-    }
-
+    if (!animation) return;
     animation.startRelease();
     this.animationByKey.delete(noteKey);
     this.creationOrder = this.creationOrder.filter((key) => key !== noteKey);
   }
 
-  /**
-   * Clear all animations
-   */
   clearAnimations() {
     this.animations = [];
     this.animationByKey.clear();
     this.creationOrder = [];
   }
 
-  /**
-   * Get p5 instance for direct access
-   */
   getP5() {
     return this.p5Instance;
   }
 }
 
-/**
- * Base Animation Class
- */
+// ---------------------------------------------------------------------------
+// Base Animation Class
+// ---------------------------------------------------------------------------
 class Animation {
   constructor(midiNote, velocity, p5Instance) {
     this.midiNote = midiNote;
-    this.velocity = velocity; // 0-1
+    this.velocity = velocity; // 0–1
     this.p5 = p5Instance;
     this.startTime = Date.now();
-    this.duration = 1500; // 1.5 seconds default
-    this.durationMultiplier = 1.0; // Sustain pedal can extend this
-    
-    // Modulation properties
+    this.duration = 1500;
+    this.durationMultiplier = 1.0;
     this.velocityModulation = velocity;
-    this.modWheelIntensity = 0; // 0-1
-    this.pitchBendModulation = 0; // -1 to 1
+    this.modWheelIntensity = 0; // 0–1
+    this.pitchBendModulation = 0; // –1 to 1
     this.sustainActive = false;
   }
 
   update(p, now) {
     this.elapsed = now - this.startTime;
-    // Account for sustain pedal extending duration
     const effectiveDuration = this.duration * this.durationMultiplier;
-    this.progress = Math.min(1, this.elapsed / effectiveDuration); // 0 to 1
+    this.progress = Math.min(1, this.elapsed / effectiveDuration);
   }
 
   startRelease() {
-    if (this.releasing) {
-      return;
-    }
-
+    if (this.releasing) return;
     this.releasing = true;
     const elapsed = Date.now() - this.startTime;
-    const releaseWindow = 180;
-    this.duration = Math.min(this.duration, elapsed + releaseWindow);
+    this.duration = Math.min(this.duration, elapsed + 180);
   }
 
-  draw(p) {
-    // Override in subclasses
-  }
+  draw(p) {} // override in subclasses
 
   isFinished(now) {
-    const effectiveDuration = this.duration * this.durationMultiplier;
-    return (now - this.startTime) > effectiveDuration;
+    return (now - this.startTime) > this.duration * this.durationMultiplier;
   }
 
   getAlpha() {
-    // Fade out in last 20% of duration
     if (this.progress > 0.8) {
-      const fadeAlpha = (1 - (this.progress - 0.8) / 0.2) * 255;
-      // Mod wheel also affects opacity
-      return fadeAlpha * (0.5 + this.modWheelIntensity * 0.5);
+      return (1 - (this.progress - 0.8) / 0.2) * 255 * (0.6 + this.modWheelIntensity * 0.4);
     }
-    return 255 * (0.5 + this.modWheelIntensity * 0.5);
-  }
-
-  getCenterX(p) {
-    return p.width / 2;
-  }
-
-  getCenterY(p) {
-    return p.height / 2;
+    return 255 * (0.7 + this.modWheelIntensity * 0.3);
   }
 }
 
-/**
- * Radiating Circles animation
- */
-class RadiatingCircles extends Animation {
+// ---------------------------------------------------------------------------
+// GlyphBurst — note-name letter at center, alphanumeric chars radiate outward
+// ---------------------------------------------------------------------------
+class GlyphBurst extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
-    this.duration = 1200;
-    // Velocity controls max radius
-    this.maxRadius = 150 + velocity * 200;
-  }
+    this.duration = 1600;
 
-  draw(p) {
-    const alpha = this.getAlpha();
-    const hue = (this.midiNote * 7) % 360;
-    const ringCount = 4 + Math.floor(this.modWheelIntensity * 4);
-    const radius = 100 + this.progress * this.maxRadius;
-    const rotation = this.progress * 180 + this.pitchBendModulation * 90;
+    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
+    this.centralChar = noteLetters[midiNote % 12];
 
-    p.push();
-    p.translate(0, 0, -200);
-    p.rotateY(rotation);
+    const glyphPool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*+-=~<>?/|';
+    this.maxRadius = 200 + velocity * 160;
+    this.particleCount = 14 + Math.floor(velocity * 22);
+    this.particles = [];
 
-    for (let i = 0; i < ringCount; i++) {
-      const ringRadius = radius * (1 + i * 0.15);
-      const sphereCount = 6 + i * 2;
-      for (let j = 0; j < sphereCount; j++) {
-        const angle = (360 / sphereCount) * j + this.progress * 120;
-        const x = Math.cos(angle) * ringRadius;
-        const y = Math.sin(angle) * ringRadius * 0.6;
-        const z = Math.sin(this.progress * 360 + angle) * 40;
-
-        p.push();
-        p.translate(x, y, z);
-        p.fill(hue, 90, 90, alpha);
-        p.sphere(12 * (1 - this.progress) + 4, 16, 16);
-        p.pop();
-      }
-    }
-
-    p.pop();
-  }
-}
-
-/**
- * Particle Burst animation
- */
-class ParticleBurst extends Animation {
-  constructor(midiNote, velocity, p5Instance) {
-    super(midiNote, velocity, p5Instance);
-    this.duration = 1500;
-    // Velocity controls particle count
-    this.particleCount = 15 + Math.floor(velocity * 35);
-    this.centerX = 0;
-    this.centerY = 0;
-    this.particles = this.createParticles(this.centerX, this.centerY);
-  }
-
-  createParticles(centerX, centerY) {
-    const particles = [];
     for (let i = 0; i < this.particleCount; i++) {
-      const angle = (Math.PI * 2 * i) / this.particleCount;
-      // Pitch bend affects burst velocity
-      const bendSpeed = 1 + this.pitchBendModulation * 0.5;
-      const speed = (50 + Math.random() * 150) * bendSpeed;
-      particles.push({
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
-        vz: (Math.random() - 0.5) * speed * 0.5,
-        x: centerX,
-        y: centerY,
-        z: 0,
-        size: 2 + Math.random() * 4
+      const angle = (360 / this.particleCount) * i + (Math.random() - 0.5) * 20;
+      this.particles.push({
+        char: glyphPool[Math.floor(Math.random() * glyphPool.length)],
+        angle,
+        radiusFrac: 0.55 + Math.random() * 0.55,
+        spinRate: (Math.random() - 0.5) * 540,
+        spin: Math.random() * 360,
+        size: 12 + Math.random() * 20,
       });
     }
-    return particles;
-  }
-
-  update(p, now) {
-    super.update(p, now);
-    if (!Array.isArray(this.particles) || this.particles.length === 0) {
-      return;
-    }
-
-    const dt = Math.min(0.033, p.deltaTime / 1000 || 0.016);
-    const gravity = 80 + this.modWheelIntensity * 40;
-
-    this.particles.forEach((particle) => {
-      particle.vy += gravity * dt;
-      particle.x += particle.vx * dt;
-      particle.y += particle.vy * dt;
-      particle.z += particle.vz * dt;
-    });
   }
 
   draw(p) {
-    if (!Array.isArray(this.particles) || this.particles.length === 0) {
-      return;
+    const alpha = this.getAlpha();
+
+    // Central note-name character — large, bright, shrinks as it fades
+    p.push();
+    const centralSize = 90 * (1.5 - this.progress * 0.7);
+    p.textSize(centralSize);
+    p.textAlign(p.CENTER, p.CENTER);
+    p.fill(255, alpha);
+    p.noStroke();
+    p.text(this.centralChar, 0, 0);
+    p.pop();
+
+    // Register crosshair (fades early)
+    const crossAlpha = alpha * (1 - this.progress) * 0.4;
+    if (crossAlpha > 4) {
+      p.push();
+      const cr = 18 + this.progress * 36;
+      p.stroke(255, crossAlpha);
+      p.strokeWeight(1);
+      p.line(-cr, 0, cr, 0);
+      p.line(0, -cr, 0, cr);
+      p.pop();
     }
 
-    const alpha = this.getAlpha();
-    const hue = (this.midiNote * 5) % 360;
-    const sizeMultiplier = this.velocityModulation * 0.5 + 0.5;
-
-    p.push();
-    p.translate(0, 0, -200);
-
+    // Burst particles — alphanumeric glyphs scatter outward
     this.particles.forEach((particle) => {
+      const eased = 1 - Math.pow(1 - this.progress, 2); // ease-out
+      const dist = eased * this.maxRadius * particle.radiusFrac;
+      const aRad = p.radians(particle.angle);
+      const x = Math.cos(aRad) * dist;
+      const y = Math.sin(aRad) * dist;
+
       p.push();
-      p.translate(particle.x, particle.y, particle.z);
-      p.fill(hue, 90, 90, alpha);
-      p.sphere(particle.size * sizeMultiplier * (1 - this.progress) + 2, 10, 10);
+      p.translate(x, y);
+      p.rotate(particle.spin + this.progress * particle.spinRate);
+      p.textSize(particle.size * (1 - this.progress * 0.45));
+      p.textAlign(p.CENTER, p.CENTER);
+      p.fill(210, alpha * (1 - this.progress * 0.25));
+      p.noStroke();
+      p.text(particle.char, 0, 0);
       p.pop();
     });
+  }
+}
 
+// ---------------------------------------------------------------------------
+// ScanlineRipple — CRT-style horizontal lines expanding from center
+// ---------------------------------------------------------------------------
+class ScanlineRipple extends Animation {
+  constructor(midiNote, velocity, p5Instance) {
+    super(midiNote, velocity, p5Instance);
+    this.duration = 1400;
+    this.lineCount = 44 + Math.floor(velocity * 36);
+    this.maxSpread = 280 + velocity * 200;
+    this.seed = Math.random() * 1000;
+  }
+
+  draw(p) {
+    const alpha = this.getAlpha();
+    const spread = this.progress * this.maxSpread;
+
+    p.push();
+    p.noFill();
+
+    for (let i = 0; i < this.lineCount; i++) {
+      const sign = i % 2 === 0 ? 1 : -1;
+      const lineIdx = Math.floor(i / 2);
+      const step = spread / Math.max(1, this.lineCount / 2);
+      const baseY = sign * lineIdx * step;
+
+      // Analog glitch offset — subsides as animation matures
+      const glitch =
+        Math.sin(lineIdx * 7.3 + this.seed + this.progress * 900) *
+        (1 - this.progress) * 7;
+      const y = baseY + glitch;
+
+      const distFrac = Math.abs(baseY) / this.maxSpread;
+      const lineAlpha = alpha * (1 - distFrac * 0.65) * (1 - this.progress * 0.35);
+      if (lineAlpha < 3) continue;
+
+      const halfLen =
+        (p.width * 0.48) * (1 - distFrac * 0.38) * Math.min(1, this.progress * 3.5);
+      const weight = Math.max(0.5, 1.8 * (1 - distFrac));
+
+      p.stroke(200, lineAlpha);
+      p.strokeWeight(weight);
+      p.line(-halfLen, y, halfLen, y);
+    }
+
+    // Bright center hot-spot line
+    p.stroke(255, alpha * (1 - this.progress * 0.25));
+    p.strokeWeight(2.5);
+    const hotLen = p.width * 0.44 * Math.min(1, this.progress * 5);
+    p.line(-hotLen, 0, hotLen, 0);
+
+    // Edge tick marks (CRT raster framing)
+    const tickAlpha = alpha * (1 - this.progress) * 0.5;
+    if (tickAlpha > 4) {
+      p.stroke(255, tickAlpha);
+      p.strokeWeight(1);
+      p.line(-hotLen, -5, -hotLen, 5);
+      p.line(hotLen, -5, hotLen, 5);
+    }
     p.pop();
   }
 }
 
-/**
- * Wave Pattern animation
- */
-class WavePattern extends Animation {
+// ---------------------------------------------------------------------------
+// RetroVector — expanding wireframe polygons with letter chars at vertices
+// ---------------------------------------------------------------------------
+class RetroVector extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
-    this.duration = 1800;
-    // Velocity affects wave frequency
-    this.frequency = 2 + velocity * 6;
-    this.amplitude = 30 + velocity * 70;
+    this.duration = 1700;
+    this.maxSize = 190 + velocity * 200;
+
+    const glyphs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
+    this.noteChar = noteLetters[midiNote % 12];
+
+    const shapeCount = 2 + Math.floor(velocity * 2);
+    this.shapes = [];
+    for (let s = 0; s < shapeCount; s++) {
+      const sides = 3 + Math.floor(Math.random() * 5); // 3–7 sided polygon
+      const verts = [];
+      for (let v = 0; v < sides; v++) {
+        verts.push({
+          angle: (360 / sides) * v + s * 27,
+          char:
+            s === 0 && v === 0
+              ? this.noteChar
+              : glyphs[Math.floor(Math.random() * glyphs.length)],
+        });
+      }
+      this.shapes.push({
+        verts,
+        spinRate: (Math.random() - 0.5) * 110,
+        radiusMult: 0.45 + s * 0.55,
+      });
+    }
   }
 
   draw(p) {
     const alpha = this.getAlpha();
-    const hue = (this.midiNote * 4) % 360;
-    const phaseShift = this.pitchBendModulation * 45;
-    const thickness = 2 + this.modWheelIntensity * 4;
 
-    p.push();
-    p.translate(0, 0, -230);
-    p.rotateX(60);
+    this.shapes.forEach((shape) => {
+      const eased = 1 - Math.pow(1 - this.progress, 1.5);
+      const radius = eased * this.maxSize * shape.radiusMult;
+      const spin = this.progress * shape.spinRate;
 
-    p.stroke(hue, 100, 100, alpha);
-    p.strokeWeight(thickness);
-    p.noFill();
+      p.push();
+      p.noFill();
+      p.stroke(255, alpha);
+      p.strokeWeight(1.5);
 
-    const points = 80;
-    p.beginShape();
+      // Wireframe polygon
+      p.beginShape();
+      shape.verts.forEach((vert) => {
+        const a = p.radians(vert.angle + spin);
+        p.vertex(Math.cos(a) * radius, Math.sin(a) * radius);
+      });
+      p.endShape(p.CLOSE);
 
-    for (let i = 0; i < points; i++) {
-      const angle = (i / points) * 360;
-      const x = Math.cos(angle + phaseShift) * 140;
-      const y = Math.sin(angle + phaseShift) * 40 * (1 - this.progress);
-      const z = Math.sin((i / points) * Math.PI * 4 + this.progress * 360) * this.amplitude * (1 - this.progress);
-      p.vertex(x, y, z);
+      // Letter at each vertex
+      shape.verts.forEach((vert) => {
+        const a = p.radians(vert.angle + spin);
+        const vx = Math.cos(a) * radius;
+        const vy = Math.sin(a) * radius;
+
+        p.push();
+        p.translate(vx, vy);
+        p.rotate(vert.angle + spin);
+        p.textSize(11 + (1 - this.progress) * 6);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.fill(255, alpha);
+        p.noStroke();
+        p.text(vert.char, 0, 0);
+        p.pop();
+      });
+      p.pop();
+    });
+
+    // Origin crosshair
+    const cAlpha = alpha * (1 - this.progress) * 0.5;
+    if (cAlpha > 4) {
+      p.push();
+      p.stroke(255, cAlpha);
+      p.strokeWeight(1);
+      p.line(-14, 0, 14, 0);
+      p.line(0, -14, 0, 14);
+      p.pop();
     }
-
-    p.endShape(p.CLOSE);
-    p.pop();
   }
 }
 
-/**
- * Expanding Rectangles animation
- */
-class ExpandingRectangles extends Animation {
+// ---------------------------------------------------------------------------
+// LetterStamp — large note-name letter drops from above and impacts center
+// ---------------------------------------------------------------------------
+class LetterStamp extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
-    this.duration = 1000;
-    // Velocity controls expansion rate
-    this.maxSize = 200 + velocity * 250;
-    this.rotationSpeed = 0;
+    this.duration = 1300;
+
+    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
+    this.letter = noteLetters[midiNote % 12];
+
+    const fragChars = '|/\\-+*.:_=!~#@';
+    const fragCount = 8 + Math.floor(velocity * 14);
+    this.fragments = [];
+    for (let i = 0; i < fragCount; i++) {
+      const angle = (360 / fragCount) * i + (Math.random() - 0.5) * 30;
+      this.fragments.push({
+        char: fragChars[i % fragChars.length],
+        angle,
+        speed: 55 + Math.random() * 130 * velocity,
+        size: 8 + Math.random() * 13,
+      });
+    }
+    this.letterSize = 120 + velocity * 70;
   }
 
   draw(p) {
     const alpha = this.getAlpha();
-    const hue = (this.midiNote * 9) % 360;
-    const rotation = this.pitchBendModulation * 90 * this.progress;
-    const rectCount = 2 + Math.floor(this.modWheelIntensity * 4);
-    const thickness = 2 + this.modWheelIntensity * 3;
+    const landingPoint = 0.38;
+
+    // Accelerating drop: starts above, arrives at center at landingPoint
+    const dropRaw = Math.min(1, this.progress / landingPoint);
+    const easeIn = dropRaw * dropRaw; // ease-in (accelerate into center)
+    const startY = -p.height * 0.52;
+    const stampY = startY * (1 - easeIn);
+
+    // Post-impact squash/stretch
+    const postImpact = Math.max(0, (this.progress - landingPoint) / (1 - landingPoint));
+    const squash = 1 + Math.sin(postImpact * Math.PI) * 0.22;
+    const stretch = 2 - squash;
+    const displaySize = this.letterSize * (1 - this.progress * 0.55);
 
     p.push();
-    p.translate(0, 0, -220);
-    p.rotateX(25 + this.progress * 15);
-    p.rotateY(rotation + this.progress * 45);
+    p.translate(0, stampY);
+    p.scale(squash, stretch);
+    p.textSize(displaySize);
+    p.textAlign(p.CENTER, p.CENTER);
+    p.fill(255, alpha);
+    p.noStroke();
+    p.text(this.letter, 0, 0);
+    p.pop();
 
-    p.stroke(hue, 100, 100, alpha);
-    p.strokeWeight(thickness);
-    p.noFill();
+    if (this.progress > landingPoint) {
+      const ringProg = (this.progress - landingPoint) / (1 - landingPoint);
+      const ringR = ringProg * (90 + this.velocity * 90);
 
-    for (let i = 0; i < rectCount; i++) {
-      const size = this.progress * this.maxSize + i * 40;
       p.push();
-      p.rotateY(i * 15);
-      p.box(size, size, 20);
+      p.noFill();
+      p.stroke(255, alpha * (1 - ringProg));
+      p.strokeWeight(2);
+      p.circle(0, 0, ringR * 2);
+
+      // Typographic fragment scatter
+      this.fragments.forEach((frag) => {
+        const dist = ringProg * frag.speed;
+        const aRad = p.radians(frag.angle);
+        const fx = Math.cos(aRad) * dist;
+        const fy = Math.sin(aRad) * dist;
+
+        p.push();
+        p.translate(fx, fy);
+        p.rotate(frag.angle + ringProg * 180);
+        p.textSize(frag.size);
+        p.textAlign(p.CENTER, p.CENTER);
+        p.fill(220, alpha * (1 - ringProg * 0.65));
+        p.noStroke();
+        p.text(frag.char, 0, 0);
+        p.pop();
+      });
       p.pop();
     }
-
-    p.pop();
   }
 }

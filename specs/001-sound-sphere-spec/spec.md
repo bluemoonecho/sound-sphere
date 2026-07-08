@@ -87,6 +87,24 @@ A user can save and restore session state locally so they can continue quickly w
 - How does the system behave when inputs exceed configured concurrent visual limits?
 - What happens when saved state is missing, outdated, or corrupted?
 
+## Visual Aesthetic Direction *(added 2026-07-08)*
+
+The visual output layer targets an **experimental retro** aesthetic with the following properties:
+
+- **Alphabet & glyph-centric**: Visual modes incorporate alphanumeric characters, punctuation, and symbols as primary graphic elements — not merely decoration. Some modes center on a note-name letter (A–G) as the dominant visual motif.
+- **Retro / phosphor feel**: The canvas uses a dark (near-black) background with high-contrast phosphor-green or amber-tinted elements that evoke CRT monitors, vector-display arcade games, and early computer terminals.
+- **Experimental character**: Animations should feel surprising and non-standard — letterforms scatter, stamp, ripple through scan lines, or orbit as polygon vertices — rather than conventional particle or geometric effects.
+- **UI panel**: The sidebar panel mirrors the retro terminal aesthetic using a monospace font, dark background, and phosphor-green accent colors throughout labels, borders, controls, and status indicators.
+
+### Visual Mode Names
+
+| Type | Name | Character |
+|------|------|-----------|
+| 0 | Glyph Burst | Note-name letter + alphanumeric characters radiate outward |
+| 1 | Scanline Ripple | CRT-style horizontal lines ripple and interfere from center |
+| 2 | Retro Vector | Expanding polygon wireframes with letter vertices |
+| 3 | Letter Stamp | Large note-name letter drops and impacts with fragment scatter |
+
 ## Requirements *(mandatory)*
 
 ### Functional Requirements

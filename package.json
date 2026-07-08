@@ -2,9 +2,9 @@
   "name": "sound-sphere",
   "version": "0.1.0",
   "type": "module",
-  "description": "MIDI-driven sound and visual platform with p5.js and Strudel",
+  "description": "MIDI / Sound / Visuals platform with p5.js and Strudel",
   "scripts": {
-    "dev": "vite",
+    "start": "vite",
     "build": "vite build",
     "preview": "vite preview"
   },
