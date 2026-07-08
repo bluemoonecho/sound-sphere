@@ -2,6 +2,11 @@
  * MidiInput.js - Web MIDI API handler for keyboard detection and event dispatch
  */
 
+import {
+  INPUT_SOURCE_TYPES,
+  createNormalizedNoteEvent
+} from './MidiConfig.js';
+
 export class MidiInput {
   constructor() {
     this.inputs = [];
@@ -12,11 +17,15 @@ export class MidiInput {
       modWheel: [],
       pitchBend: [],
       sustain: [],
+      normalizedNote: [],
+      midiControl: [],
       deviceConnected: [],
-      deviceDisconnected: []
+      deviceDisconnected: [],
+      warningState: []
     };
     this.isSupported = false;
     this.accessGranted = false;
+    this.warningState = 'none';
   }
 
   /**
@@ -25,6 +34,8 @@ export class MidiInput {
   async init() {
     if (!navigator.requestMIDIAccess) {
       console.warn('Web MIDI API not supported in this browser');
+      this.warningState = 'unsupported';
+      this.emit('warningState', { state: this.warningState });
       return false;
     }
 
@@ -35,11 +46,15 @@ export class MidiInput {
       
       this.setupInputs(midiAccess);
       this.setupStateChangeListener(midiAccess);
+      this.warningState = 'none';
+      this.emit('warningState', { state: this.warningState });
       
       console.log('Web MIDI API initialized');
       return true;
     } catch (error) {
       console.error('MIDI access denied:', error);
+      this.warningState = 'permission-denied';
+      this.emit('warningState', { state: this.warningState, error });
       return false;
     }
   }
@@ -73,6 +88,10 @@ export class MidiInput {
     if (this.selectedInput?.id === midiInput.id) {
       this.selectedInput = null;
     }
+    if (this.inputs.length === 0) {
+      this.warningState = 'device-disconnected';
+      this.emit('warningState', { state: this.warningState, device: midiInput });
+    }
     this.emit('deviceDisconnected', midiInput);
   }
 
@@ -96,6 +115,10 @@ export class MidiInput {
    */
   selectInput(inputId) {
     this.selectedInput = this.inputs.find(inp => inp.id === inputId) || null;
+    if (this.selectedInput) {
+      this.warningState = 'none';
+      this.emit('warningState', { state: this.warningState });
+    }
     return this.selectedInput;
   }
 
@@ -125,27 +148,63 @@ export class MidiInput {
     const [status, data1, data2] = msg.data;
     const statusHigh = status & 0xf0;
     const channel = status & 0x0f;
+    const receivedAt = performance.now();
 
     switch (statusHigh) {
       case 0x90: // Note On
         if (data2 > 0) {
-          this.emit('noteOn', { note: data1, velocity: data2, channel });
+          const noteOn = createNormalizedNoteEvent({
+            sourceType: INPUT_SOURCE_TYPES.MIDI,
+            phase: 'noteOn',
+            note: data1,
+            velocity: data2,
+            channel,
+            receivedAt
+          });
+          this.emit('normalizedNote', noteOn);
+          this.emit('noteOn', noteOn);
         } else {
-          this.emit('noteOff', { note: data1, velocity: 0, channel });
+          const noteOffFromZeroVelocity = createNormalizedNoteEvent({
+            sourceType: INPUT_SOURCE_TYPES.MIDI,
+            phase: 'noteOff',
+            note: data1,
+            velocity: 0,
+            channel,
+            receivedAt
+          });
+          this.emit('normalizedNote', noteOffFromZeroVelocity);
+          this.emit('noteOff', noteOffFromZeroVelocity);
         }
         break;
 
       case 0x80: // Note Off
-        this.emit('noteOff', { note: data1, velocity: data2, channel });
+        {
+          const noteOff = createNormalizedNoteEvent({
+            sourceType: INPUT_SOURCE_TYPES.MIDI,
+            phase: 'noteOff',
+            note: data1,
+            velocity: data2,
+            channel,
+            receivedAt
+          });
+          this.emit('normalizedNote', noteOff);
+          this.emit('noteOff', noteOff);
+        }
         break;
 
       case 0xb0: // Control Change
-        this.handleControlChange(data1, data2, channel);
+        this.handleControlChange(data1, data2, channel, receivedAt);
         break;
 
       case 0xe0: // Pitch Bend
         const pitchValue = ((data2 << 7) | data1) - 8192; // Center at 0
-        this.emit('pitchBend', { value: pitchValue, channel });
+        this.emit('pitchBend', { value: pitchValue, channel, receivedAt });
+        this.emit('midiControl', {
+          type: 'pitchBend',
+          value: pitchValue,
+          channel,
+          receivedAt
+        });
         break;
     }
   }
@@ -153,16 +212,29 @@ export class MidiInput {
   /**
    * Handle Control Change messages
    */
-  handleControlChange(cc, value, channel) {
+  handleControlChange(cc, value, channel, receivedAt) {
     switch (cc) {
       case 1: // Mod Wheel
-        this.emit('modWheel', { value, channel });
+        this.emit('modWheel', { value, channel, receivedAt });
+        this.emit('midiControl', {
+          type: 'modWheel',
+          value,
+          channel,
+          receivedAt
+        });
         break;
 
       case 64: // Sustain Pedal
         this.emit('sustain', { 
           active: value >= 64, 
-          channel 
+          channel,
+          receivedAt
+        });
+        this.emit('midiControl', {
+          type: 'sustain',
+          value: value >= 64,
+          channel,
+          receivedAt
         });
         break;
 
@@ -205,5 +277,9 @@ export class MidiInput {
         }
       });
     }
+  }
+
+  getWarningState() {
+    return this.warningState;
   }
 }

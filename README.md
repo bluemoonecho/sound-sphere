@@ -9,6 +9,10 @@ A browser-based platform that synchronizes sound and visuals through MIDI input.
 - **Real-time Sound Synthesis**: Strudel-powered procedural audio generation
 - **Responsive Animations**: 4 distinct animation types with p5.js (black & white, geometry-based)
 - **MIDI Modulation Support**: Velocity, mod wheel, pitch bend, sustain pedal
+- **Keyboard Parity Mode**: Computer keyboard note input follows the same normalized note lifecycle as MIDI
+- **MIDI Priority Arbitration**: Keyboard note events are ignored while a MIDI device is active
+- **Fallback Warning States**: Visible warning for unsupported, permission-denied, or disconnected MIDI
+- **Disconnect Safety**: Active MIDI notes are force-released within 250 ms after disconnect
 - **Session Persistence**: Save/load sessions via localStorage
 - **Offline Operation**: Fully functional without internet connection
 - **Keyboard Shortcuts**: Number keys (1-4) to switch animation types; Space to clear
@@ -82,13 +86,24 @@ npm run build
 MIDI Keyboard
     ↓
 Web MIDI API (MidiInput.js)
-    ↓ Note, Velocity, CC events
+    ↓ Normalized note + control events
     ↓
-Event Dispatcher
+Keyboard Input (KeyboardInput.js)
+    ↓ Normalized note events
+    ↓
+Arbitration (MIDI priority)
+    ↓
+Shared Event Dispatcher
     ├─→ StrudelEngine (sound trigger)
     └─→ AnimationController (animation trigger)
         └─→ P5Sketch (visual rendering)
 ```
+
+### Input Arbitration Rules
+
+- If a MIDI input is selected and active, keyboard note events are ignored.
+- If MIDI is unavailable or permission is denied, keyboard mode remains playable and warning UI is shown.
+- On MIDI disconnect during active notes, the app switches to keyboard mode and enforces forced note release at 250 ms.
 
 ### Animation Lifecycle
 
@@ -167,6 +182,11 @@ Edit `src/sound/PatternLibrary.js`:
 - Check that keyboard is plugged in and powered on
 - Try refreshing the page
 - Verify in browser permissions that MIDI access is allowed
+
+### Keyboard notes not triggering
+
+- Confirm no MIDI input is currently selected (MIDI priority blocks keyboard note events).
+- If MIDI was disconnected, wait up to 250 ms for forced note release to complete.
 
 ### No sound
 - Check browser console for Strudel initialization errors

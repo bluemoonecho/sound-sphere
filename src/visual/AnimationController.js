@@ -14,26 +14,42 @@ export class AnimationController {
     };
   }
 
+  handleNoteEvent(event) {
+    if (!event) {
+      return;
+    }
+
+    if (event.phase === 'noteOn') {
+      this.onNoteOn(event.note, event.velocity, event.noteKey);
+      return;
+    }
+
+    if (event.phase === 'noteOff') {
+      this.onNoteOff(event.note, event.noteKey);
+    }
+  }
+
   /**
    * Trigger animation on MIDI note with velocity
    */
-  onNoteOn(midiNote, velocity) {
-    this.p5Sketch.triggerAnimation(midiNote, velocity);
+  onNoteOn(midiNote, velocity, noteKey = `note:${midiNote}`) {
+    this.p5Sketch.triggerAnimation(midiNote, velocity, noteKey);
     this.activeNotes.add(midiNote);
     
     // Store animation metadata
     this.animationMap.set(midiNote, {
       triggered: Date.now(),
       velocity: velocity,
-      modulation: { ...this.globalModulation }
+      modulation: { ...this.globalModulation },
+      noteKey
     });
   }
 
   /**
    * Stop animation on note off
    */
-  onNoteOff(midiNote) {
-    this.p5Sketch.stopNote(midiNote);
+  onNoteOff(midiNote, noteKey = `note:${midiNote}`) {
+    this.p5Sketch.stopNote(midiNote, noteKey);
     this.activeNotes.delete(midiNote);
     this.animationMap.delete(midiNote);
   }

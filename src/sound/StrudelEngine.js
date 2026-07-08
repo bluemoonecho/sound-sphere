@@ -15,6 +15,24 @@ export class StrudelEngine {
   }
 
   /**
+   * Unified note event handler for MIDI and keyboard normalized events.
+   */
+  handleNoteEvent(event) {
+    if (!event) {
+      return;
+    }
+
+    if (event.phase === 'noteOn') {
+      this.triggerNote(event.note, event.velocity);
+      return;
+    }
+
+    if (event.phase === 'noteOff') {
+      this.stopNote(event.note);
+    }
+  }
+
+  /**
    * Initialize Web Audio API with master effects chain
    */
   async init() {
@@ -342,6 +360,12 @@ export class StrudelEngine {
         console.error('Error applying pitch bend:', error);
       }
     }
+  }
+
+  applyPitchBendToActive(bendValue) {
+    this.activeSynths.forEach((_, midiNote) => {
+      this.applyPitchBend(midiNote, bendValue);
+    });
   }
 
   /**

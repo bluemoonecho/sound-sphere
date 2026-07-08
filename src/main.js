@@ -4,15 +4,23 @@
 
 import { MidiInput } from './midi/MidiInput.js';
 import { KeyboardInput } from './midi/KeyboardInput.js';
-import { KEYBOARD_CONFIG, VELOCITY_RANGES, PITCH_BEND_CONFIG } from './midi/MidiConfig.js';
+import {
+  INPUT_SOURCE_TYPES,
+  KEYBOARD_CONFIG,
+  PITCH_BEND_CONFIG,
+  VELOCITY_RANGES,
+  createNormalizedNoteEvent,
+  isPlayableNote
+} from './midi/MidiConfig.js';
 import { StrudelEngine } from './sound/StrudelEngine.js';
 import { P5Sketch } from './visual/P5Sketch.js';
 import { AnimationController } from './visual/AnimationController.js';
 import { SessionManager } from './session/SessionManager.js';
 
+const DISCONNECT_RELEASE_TIMEOUT_MS = 250;
+
 class SoundSphere {
   constructor() {
-    // Core components
     this.midiInput = new MidiInput();
     this.keyboardInput = new KeyboardInput();
     this.soundEngine = new StrudelEngine();
@@ -20,85 +28,74 @@ class SoundSphere {
     this.animationController = new AnimationController(this.p5Sketch);
     this.sessionManager = new SessionManager();
 
-    // UI State
     this.uiState = {
-      midiSelected: false,
-      midiDevices: [],
       currentAnimationType: 0,
-      useKeyboard: false
+      warningState: 'none',
+      activeSource: INPUT_SOURCE_TYPES.KEYBOARD,
+      midiSelected: false
     };
+
+    this.performanceStats = {
+      samples: 0,
+      averageLatencyMs: 0,
+      maxLatencyMs: 0,
+      lastLatencyMs: 0
+    };
+
+    this.activeMidiNotes = new Set();
+    this.disconnectTimers = new Map();
   }
 
-  /**
-   * Initialize the entire application
-   */
   async init() {
     console.log('Initializing Sound Sphere...');
 
     try {
-      // Initialize MIDI
       const midiSupported = await this.midiInput.init();
+      this.keyboardInput.init();
+
       if (!midiSupported) {
-        console.warn('Web MIDI not supported - enabling keyboard fallback');
+        this.uiState.warningState = this.midiInput.getWarningState();
       }
 
-      // Always initialize keyboard input as fallback
-      this.keyboardInput.init();
-      this.uiState.useKeyboard = true;
-
-      // Initialize sound engine
       const soundReady = await this.soundEngine.init();
       if (!soundReady) {
         console.warn('Sound engine failed to initialize');
       }
 
-      // Initialize visuals
       this.p5Sketch.init();
 
-      // Setup UI
       this.setupUI();
-
-      // Setup MIDI event listeners
-      this.setupMidiListeners();
-
-      // Setup keyboard event listeners
-      this.setupKeyboardListeners();
-
-      // Setup keyboard shortcuts
+      this.setupInputListeners();
       this.setupKeyboardShortcuts();
-
-      // Load last session if available
       this.loadLastSession();
 
+      this.ensureDefaultMidiSelection();
+      this.updateInputStatus();
+      this.updateWarningBanner();
+      this.updatePerfStatus();
+
       console.log('Sound Sphere initialized successfully');
-      this.updateMidiStatus();
     } catch (error) {
       console.error('Failed to initialize Sound Sphere:', error);
     }
   }
 
-  /**
-   * Setup UI controls
-   */
   setupUI() {
-    // MIDI device selector
     const midiSelect = document.getElementById('midi-select');
     if (midiSelect) {
       midiSelect.addEventListener('change', (e) => this.selectMidiDevice(e.target.value));
       this.updateMidiDeviceList();
     }
 
-    // Animation type selector
     const animSelect = document.getElementById('animation-select');
     if (animSelect) {
       animSelect.addEventListener('change', (e) => {
-        const type = parseInt(e.target.value);
+        const type = Number.parseInt(e.target.value, 10);
         this.animationController.setAnimationType(type);
         this.uiState.currentAnimationType = type;
       });
     }
 
-    // Session controls
     const saveBtn = document.getElementById('save-session');
     const loadBtn = document.getElementById('load-session');
     const clearBtn = document.getElementById('clear-session');
@@ -114,252 +111,227 @@ class SoundSphere {
     }
   }
 
-  /**
-   * Setup keyboard event listeners (for Mac keyboard fallback)
-   */
-  setupKeyboardListeners() {
-    this.keyboardInput.on('noteOn', (data) => {
-      const { note, velocity } = data;
-
-      // Check if note is in our 3-octave range
-      if (!KEYBOARD_CONFIG.isInRange(note)) {
-        return;
-      }
-
-      console.log(`Keyboard: Note On ${KEYBOARD_CONFIG.getMidiNoteName(note)} Velocity: ${velocity}`);
-
-      // Trigger sound
-      this.soundEngine.triggerNote(note, velocity);
-
-      // Trigger animation
-      this.animationController.onNoteOn(note, velocity);
-
-      // Update UI
-      this.updateNoteInfo(note, velocity);
+  setupInputListeners() {
+    this.midiInput.on('normalizedNote', (event) => {
+      this.routeNormalizedNoteEvent(event);
     });
 
-    this.keyboardInput.on('noteOff', (data) => {
-      const { note } = data;
+    this.keyboardInput.on('normalizedNote', (event) => {
+      this.routeNormalizedNoteEvent(event);
+    });
 
-      if (!KEYBOARD_CONFIG.isInRange(note)) {
-        return;
-      }
+    this.midiInput.on('midiControl', (event) => {
+      this.routeControlEvent(event);
+    });
 
-      console.log(`Keyboard: Note Off ${KEYBOARD_CONFIG.getMidiNoteName(note)}`);
+    this.midiInput.on('warningState', ({ state }) => {
+      this.uiState.warningState = state;
+      this.updateWarningBanner();
+      this.updateInputStatus();
+    });
 
-      // Stop sound
-      this.soundEngine.stopNote(note);
+    this.midiInput.on('deviceConnected', () => {
+      this.ensureDefaultMidiSelection();
+      this.updateMidiDeviceList();
+      this.updateInputStatus();
+      this.updateWarningBanner();
+    });
 
-      // Stop animation
-      this.animationController.onNoteOff(note);
-
-      // Clear note info
-      this.updateNoteInfo(null, 0);
+    this.midiInput.on('deviceDisconnected', () => {
+      this.handleMidiDisconnect();
+      this.updateMidiDeviceList();
+      this.updateInputStatus();
+      this.updateWarningBanner();
     });
   }
 
-  /**
-   * Setup MIDI event listeners
-   */
-  setupMidiListeners() {
-    this.midiInput.on('noteOn', (data) => {
-      const { note, velocity } = data;
-
-      // Check if note is in our 3-octave range
-      if (!KEYBOARD_CONFIG.isInRange(note)) {
-        return;
-      }
-
-      console.log(`Note On: ${KEYBOARD_CONFIG.getMidiNoteName(note)} Velocity: ${velocity}`);
-
-      // Trigger sound
-      this.soundEngine.triggerNote(note, velocity);
-
-      // Trigger animation
-      this.animationController.onNoteOn(note, velocity);
-
-      // Update UI
-      this.updateNoteInfo(note, velocity);
-    });
-
-    this.midiInput.on('noteOff', (data) => {
-      const { note } = data;
-
-      if (!KEYBOARD_CONFIG.isInRange(note)) {
-        return;
-      }
-
-      console.log(`Note Off: ${KEYBOARD_CONFIG.getMidiNoteName(note)}`);
-
-      // Stop sound
-      this.soundEngine.stopNote(note);
-
-      // Stop animation
-      this.animationController.onNoteOff(note);
-
-      // Clear note info
-      this.updateNoteInfo(null, 0);
-    });
-
-    this.midiInput.on('modWheel', (data) => {
-      const { value } = data;
-      const normalized = value / 127;
-      console.log(`Mod Wheel: ${normalized.toFixed(2)}`);
-
-      // Apply modulation to sound and animation
-      this.soundEngine.applyModulation(normalized);
-      this.animationController.applyModWheel(normalized);
-    });
-
-    this.midiInput.on('pitchBend', (data) => {
-      const { value, note } = data;
-      const normalized = PITCH_BEND_CONFIG.getNormalizedBend(value + 8192);
-      console.log(`Pitch Bend: ${normalized.toFixed(2)}`);
-
-      // Apply pitch bend to sound and animation
-      if (KEYBOARD_CONFIG.isInRange(note)) {
-        this.soundEngine.applyPitchBend(note, normalized);
-      }
-      this.animationController.applyPitchBend(normalized);
-    });
-
-    this.midiInput.on('sustain', (data) => {
-      const { active } = data;
-      console.log(`Sustain: ${active ? 'ON' : 'OFF'}`);
-
-      // Apply sustain effect
-      this.animationController.applySustain(active);
-    });
-
-    this.midiInput.on('deviceConnected', (device) => {
-      console.log(`MIDI Device connected: ${device.name}`);
-      this.updateMidiDeviceList();
-    });
-
-    this.midiInput.on('deviceDisconnected', (device) => {
-      console.log(`MIDI Device disconnected: ${device.name}`);
-      this.updateMidiDeviceList();
-    });
-  }
-
-  /**
-   * Setup keyboard shortcuts
-   */
   setupKeyboardShortcuts() {
-    let pitchBendValue = 0;
-    let modWheelValue = 0;
-    const bendStep = 0.1; // Increment per key press
-
     document.addEventListener('keydown', (e) => {
-      // Number keys 1-4 to switch animation types
       if (e.key >= '1' && e.key <= '4') {
-        const type = parseInt(e.key) - 1;
+        const type = Number.parseInt(e.key, 10) - 1;
         this.animationController.setAnimationType(type);
+        this.uiState.currentAnimationType = type;
         const animSelect = document.getElementById('animation-select');
-        if (animSelect) animSelect.value = type;
+        if (animSelect) {
+          animSelect.value = String(type);
+        }
       }
 
-      // Space to clear animations
       if (e.code === 'Space') {
         this.animationController.clear();
         e.preventDefault();
       }
-
-      // Arrow keys for pitch bend simulation
-      if (e.key === 'ArrowUp') {
-        pitchBendValue = Math.min(1, pitchBendValue + bendStep);
-        this.animationController.applyPitchBend(pitchBendValue);
-        // Find first active note for sound engine
-        const activeNotes = this.animationController.getActiveNotes();
-        if (activeNotes.length > 0) {
-          this.soundEngine.applyPitchBend(activeNotes[0], pitchBendValue);
-        }
-        console.log(`⬆️ Pitch Bend: +${(pitchBendValue * 100).toFixed(0)}%`);
-        e.preventDefault();
-      }
-
-      if (e.key === 'ArrowDown') {
-        pitchBendValue = Math.max(-1, pitchBendValue - bendStep);
-        this.animationController.applyPitchBend(pitchBendValue);
-        const activeNotes = this.animationController.getActiveNotes();
-        if (activeNotes.length > 0) {
-          this.soundEngine.applyPitchBend(activeNotes[0], pitchBendValue);
-        }
-        console.log(`⬇️ Pitch Bend: ${(pitchBendValue * 100).toFixed(0)}%`);
-        e.preventDefault();
-      }
-
-      // Shift + Arrow keys for mod wheel simulation
-      if (e.shiftKey && e.key === 'ArrowRight') {
-        modWheelValue = Math.min(1, modWheelValue + bendStep);
-        this.soundEngine.applyModulation(modWheelValue);
-        this.animationController.applyModWheel(modWheelValue);
-        console.log(`🎛️  Mod Wheel: +${(modWheelValue * 100).toFixed(0)}%`);
-        e.preventDefault();
-      }
-
-      if (e.shiftKey && e.key === 'ArrowLeft') {
-        modWheelValue = Math.max(0, modWheelValue - bendStep);
-        this.soundEngine.applyModulation(modWheelValue);
-        this.animationController.applyModWheel(modWheelValue);
-        console.log(`🎛️  Mod Wheel: ${(modWheelValue * 100).toFixed(0)}%`);
-        e.preventDefault();
-      }
-
-      // 's' key for sustain toggle
-      if (e.key === 's' || e.key === 'S') {
-        const activeNotes = this.animationController.getActiveNotes();
-        if (activeNotes.length > 0) {
-          // Toggle sustain state
-          const currentInfo = this.animationController.getAnimationInfo();
-          const newSustainState = !currentInfo.modulation.sustain;
-          this.animationController.applySustain(newSustainState);
-          console.log(`🎵 Sustain: ${newSustainState ? 'ON' : 'OFF'}`);
-        }
-      }
-    });
-
-    document.addEventListener('keyup', (e) => {
-      // Reset pitch bend when no arrow key pressed
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        // Could add smooth return to center, for now just log
-      }
     });
   }
 
-  /**
-   * Select a MIDI device
-   */
+  routeNormalizedNoteEvent(event) {
+    if (!event || !isPlayableNote(event.note)) {
+      return;
+    }
+
+    const midiIsActive = this.isMidiActive();
+
+    if (event.sourceType === INPUT_SOURCE_TYPES.KEYBOARD && midiIsActive) {
+      return;
+    }
+
+    this.uiState.activeSource = midiIsActive ? INPUT_SOURCE_TYPES.MIDI : event.sourceType;
+
+    if (event.sourceType === INPUT_SOURCE_TYPES.MIDI) {
+      if (event.phase === 'noteOn') {
+        this.activeMidiNotes.add(event.note);
+        this.clearDisconnectTimer(event.note);
+      } else {
+        this.activeMidiNotes.delete(event.note);
+      }
+    }
+
+    this.dispatchNormalizedEvent(event);
+  }
+
+  dispatchNormalizedEvent(event) {
+    const dispatchTimestamp = performance.now();
+    const dispatchEvent = {
+      ...event,
+      dispatchAt: dispatchTimestamp
+    };
+
+    if (dispatchEvent.phase === 'noteOn') {
+      this.soundEngine.handleNoteEvent(dispatchEvent);
+      this.animationController.handleNoteEvent(dispatchEvent);
+      this.updateNoteInfo(dispatchEvent.note, dispatchEvent.velocity, dispatchEvent.sourceType);
+      this.captureLatency(dispatchEvent);
+    } else {
+      this.soundEngine.handleNoteEvent(dispatchEvent);
+      this.animationController.handleNoteEvent(dispatchEvent);
+      this.updateNoteInfo(null, 0, dispatchEvent.sourceType);
+    }
+  }
+
+  routeControlEvent(event) {
+    if (!event) {
+      return;
+    }
+
+    if (event.type === 'modWheel') {
+      const normalized = event.value / 127;
+      this.soundEngine.applyModulation(normalized);
+      this.animationController.applyModWheel(normalized);
+    }
+
+    if (event.type === 'pitchBend') {
+      const normalized = PITCH_BEND_CONFIG.getNormalizedBend(event.value + 8192);
+      this.soundEngine.applyPitchBendToActive(normalized);
+      this.animationController.applyPitchBend(normalized);
+    }
+
+    if (event.type === 'sustain') {
+      this.animationController.applySustain(Boolean(event.value));
+    }
+  }
+
+  captureLatency(event) {
+    const latencyMs = Math.max(0, event.dispatchAt - event.receivedAt);
+    this.performanceStats.samples += 1;
+    this.performanceStats.lastLatencyMs = latencyMs;
+    this.performanceStats.maxLatencyMs = Math.max(this.performanceStats.maxLatencyMs, latencyMs);
+    this.performanceStats.averageLatencyMs =
+      ((this.performanceStats.averageLatencyMs * (this.performanceStats.samples - 1)) + latencyMs)
+      / this.performanceStats.samples;
+
+    this.updatePerfStatus();
+  }
+
+  updatePerfStatus() {
+    const perfEl = document.getElementById('perf-status');
+    if (!perfEl) {
+      return;
+    }
+
+    perfEl.textContent = `Latency avg ${this.performanceStats.averageLatencyMs.toFixed(1)} ms, max ${this.performanceStats.maxLatencyMs.toFixed(1)} ms`;
+  }
+
+  handleMidiDisconnect() {
+    if (this.midiInput.getInputs().length === 0) {
+      this.uiState.activeSource = INPUT_SOURCE_TYPES.KEYBOARD;
+      this.uiState.warningState = 'device-disconnected';
+
+      this.activeMidiNotes.forEach((note) => {
+        this.scheduleForcedMidiRelease(note);
+      });
+    }
+  }
+
+  scheduleForcedMidiRelease(note) {
+    this.clearDisconnectTimer(note);
+
+    const timerId = window.setTimeout(() => {
+      const forcedOff = createNormalizedNoteEvent({
+        sourceType: INPUT_SOURCE_TYPES.MIDI,
+        phase: 'noteOff',
+        note,
+        velocity: 0,
+        channel: 0,
+        meta: { forced: true, reason: 'disconnect-timeout' }
+      });
+      this.activeMidiNotes.delete(note);
+      this.dispatchNormalizedEvent(forcedOff);
+      this.disconnectTimers.delete(note);
+    }, DISCONNECT_RELEASE_TIMEOUT_MS);
+
+    this.disconnectTimers.set(note, timerId);
+  }
+
+  clearDisconnectTimer(note) {
+    const timerId = this.disconnectTimers.get(note);
+    if (timerId) {
+      window.clearTimeout(timerId);
+      this.disconnectTimers.delete(note);
+    }
+  }
+
+  ensureDefaultMidiSelection() {
+    const devices = this.midiInput.getInputs();
+    if (devices.length > 0 && !this.midiInput.getSelectedInput()) {
+      this.midiInput.selectInput(devices[0].id);
+      const midiSelect = document.getElementById('midi-select');
+      if (midiSelect) {
+        midiSelect.value = devices[0].id;
+      }
+    }
+  }
+
+  isMidiActive() {
+    return Boolean(this.midiInput.getSelectedInput());
+  }
+
   selectMidiDevice(deviceId) {
-    if (deviceId === '') {
+    if (!deviceId) {
       this.midiInput.selectInput(null);
       this.uiState.midiSelected = false;
     } else {
       this.midiInput.selectInput(deviceId);
       this.uiState.midiSelected = true;
+      this.uiState.activeSource = INPUT_SOURCE_TYPES.MIDI;
     }
-    this.updateMidiStatus();
+
+    this.updateInputStatus();
+    this.updateWarningBanner();
   }
 
-  /**
-   * Update MIDI device list in UI
-   */
   updateMidiDeviceList() {
     const midiSelect = document.getElementById('midi-select');
-    if (!midiSelect) return;
+    if (!midiSelect) {
+      return;
+    }
 
     const devices = this.midiInput.getInputs();
-    this.uiState.midiDevices = devices;
+    const selectedId = this.midiInput.getSelectedInput()?.id || '';
 
-    // Store current selection
-    const currentValue = midiSelect.value;
-
-    // Clear options except first
     while (midiSelect.options.length > 1) {
       midiSelect.remove(1);
     }
 
-    // Add device options
     devices.forEach((device) => {
       const option = document.createElement('option');
       option.value = device.id;
@@ -367,126 +339,133 @@ class SoundSphere {
       midiSelect.appendChild(option);
     });
 
-    // Restore selection if still valid
-    if (currentValue && [...devices].find(d => d.id === currentValue)) {
-      midiSelect.value = currentValue;
-    }
+    midiSelect.value = selectedId;
   }
 
-  /**
-   * Update MIDI status indicator
-   */
-  updateMidiStatus() {
+  updateInputStatus() {
     const statusEl = document.getElementById('midi-status');
     const infoEl = document.getElementById('midi-info');
 
-    if (!statusEl || !infoEl) return;
+    if (!statusEl || !infoEl) {
+      return;
+    }
 
     const selected = this.midiInput.getSelectedInput();
     const devices = this.midiInput.getInputs();
 
     if (selected) {
       statusEl.className = 'status connected';
-      statusEl.textContent = 'Connected';
-      infoEl.textContent = `Connected to: ${selected.name}`;
-    } else if (devices.length > 0) {
-      statusEl.className = 'status disconnected';
-      statusEl.textContent = 'Ready';
-      infoEl.textContent = `${devices.length} device(s) available. Select one. (or use keyboard)`;
-    } else {
-      statusEl.className = 'status disconnected';
-      statusEl.textContent = 'Keyboard Ready';
-      infoEl.textContent = 'No MIDI devices. Using Mac keyboard (Z X C V B N M keys).';
+      statusEl.textContent = 'MIDI Active';
+      infoEl.textContent = `Connected to ${selected.name}. Keyboard note-on ignored while MIDI is active.`;
+      return;
     }
+
+    if (devices.length > 0) {
+      statusEl.className = 'status disconnected';
+      statusEl.textContent = 'MIDI Ready';
+      infoEl.textContent = 'Select a MIDI input or continue in keyboard mode.';
+      return;
+    }
+
+    statusEl.className = 'status disconnected';
+    statusEl.textContent = 'Keyboard Mode';
+    infoEl.textContent = 'Using keyboard fallback in playable 3-octave range.';
   }
 
-  /**
-   * Update note info in UI
-   */
-  updateNoteInfo(midiNote, velocity) {
+  updateWarningBanner() {
+    const warningEl = document.getElementById('input-warning');
+    if (!warningEl) {
+      return;
+    }
+
+    const warningMessages = {
+      none: '',
+      unsupported: 'Web MIDI is not supported in this browser. Keyboard fallback is active.',
+      'permission-denied': 'MIDI permission denied. Keyboard fallback is active.',
+      'device-disconnected': 'MIDI device disconnected. Switched to keyboard fallback.'
+    };
+
+    const message = warningMessages[this.uiState.warningState] || '';
+    warningEl.textContent = message;
+    warningEl.classList.toggle('visible', Boolean(message));
+  }
+
+  updateNoteInfo(midiNote, velocity, sourceType) {
     const noteInfoEl = document.getElementById('note-info');
-    if (!noteInfoEl) return;
+    if (!noteInfoEl) {
+      return;
+    }
 
     if (midiNote !== null && KEYBOARD_CONFIG.isInRange(midiNote)) {
       const noteName = KEYBOARD_CONFIG.getMidiNoteName(midiNote);
       const octave = KEYBOARD_CONFIG.getOctaveIndex(midiNote);
       const normalized = VELOCITY_RANGES.getNormalizedVelocity(velocity);
-      noteInfoEl.textContent = `Note: ${noteName} | Octave: ${octave} | Velocity: ${(normalized * 100).toFixed(0)}%`;
-    } else {
-      noteInfoEl.textContent = '';
-    }
-  }
-
-  /**
-   * Save current session
-   */
-  saveSession() {
-    const timestamp = new Date().toLocaleTimeString();
-    const state = this.sessionManager.getStateSnapshot(this);
-    const session = this.sessionManager.saveSession(`Session ${timestamp}`, state);
-
-    alert(`Session saved: ${session.name}`);
-    console.log('Session saved:', session);
-  }
-
-  /**
-   * Load a session
-   */
-  loadSession() {
-    const sessions = this.sessionManager.getSessionList();
-
-    if (sessions.length === 0) {
-      alert('No saved sessions');
+      noteInfoEl.textContent = `Source ${sourceType} | Note ${noteName} | Octave ${octave} | Velocity ${(normalized * 100).toFixed(0)}%`;
       return;
     }
 
-    const sessionNames = sessions.map(s => s.name).join('\n');
-    const sessionName = prompt(`Select a session:\n\n${sessionNames}`);
-
-    if (!sessionName) return;
-
-    const session = sessions.find(s => s.name === sessionName);
-    if (session) {
-      const loaded = this.sessionManager.loadSession(session.id);
-      if (loaded) {
-        this.animationController.setAnimationType(loaded.state.animationType);
-        const animSelect = document.getElementById('animation-select');
-        if (animSelect) animSelect.value = loaded.state.animationType;
-        console.log('Session loaded:', loaded);
-      }
-    }
+    noteInfoEl.textContent = '';
   }
 
-  /**
-   * Load last session on startup
-   */
+  saveSession() {
+    const timestamp = new Date().toLocaleTimeString();
+    const state = this.sessionManager.getStateSnapshot(this);
+    this.sessionManager.saveSession(`Session ${timestamp}`, state);
+  }
+
+  loadSession() {
+    const sessions = this.sessionManager.getSessionList();
+    if (sessions.length === 0) {
+      return;
+    }
+
+    const latest = sessions[sessions.length - 1];
+    const loaded = this.sessionManager.loadSession(latest.id);
+    if (!loaded) {
+      return;
+    }
+
+    const restored = this.sessionManager.restoreState(loaded.state);
+    this.animationController.setAnimationType(restored.animationType);
+    this.uiState.warningState = restored.warningState;
+
+    const animSelect = document.getElementById('animation-select');
+    if (animSelect) {
+      animSelect.value = String(restored.animationType);
+    }
+
+    this.updateWarningBanner();
+    this.updateInputStatus();
+  }
+
   loadLastSession() {
-    const sessions = this.sessionManager.getAllSessions();
-    if (sessions.length > 0) {
-      const lastSession = sessions[sessions.length - 1];
-      const loaded = this.sessionManager.loadSession(lastSession.id);
-      if (loaded) {
-        this.animationController.setAnimationType(loaded.state.animationType);
-      }
+    const restored = this.sessionManager.loadLastState();
+    if (!restored) {
+      return;
+    }
+
+    this.animationController.setAnimationType(restored.animationType);
+    this.uiState.warningState = restored.warningState;
+
+    const animSelect = document.getElementById('animation-select');
+    if (animSelect) {
+      animSelect.value = String(restored.animationType);
     }
   }
 
-  /**
-   * Clear current session
-   */
   clearSession() {
-    if (confirm('Clear current animation and settings?')) {
-      this.animationController.clear();
-      const animSelect = document.getElementById('animation-select');
-      if (animSelect) animSelect.value = 0;
+    this.animationController.clear();
+    this.sessionManager.clearAllSessions();
+
+    const animSelect = document.getElementById('animation-select');
+    if (animSelect) {
+      animSelect.value = '0';
     }
   }
 }
 
-// Initialize app on page load
 window.addEventListener('DOMContentLoaded', async () => {
   const app = new SoundSphere();
   await app.init();
-  // Make app globally accessible for debugging
   window.soundSphere = app;
 });

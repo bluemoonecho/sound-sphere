@@ -5,6 +5,7 @@
 export class SessionManager {
   constructor() {
     this.storageKey = 'sound-sphere-sessions';
+    this.schemaVersion = '2.0.0';
     this.sessions = this.loadAllSessions();
   }
 
@@ -17,9 +18,12 @@ export class SessionManager {
       name: name || `Session ${new Date().toLocaleTimeString()}`,
       timestamp: Date.now(),
       state: {
+        version: this.schemaVersion,
         animationType: state.animationType || 0,
         patternSet: state.patternSet || 'default',
         midiDeviceId: state.midiDeviceId || null,
+        activeSource: state.activeSource || 'keyboard',
+        warningState: state.warningState || 'none',
         settings: state.settings || {}
       }
     };
@@ -146,12 +150,62 @@ export class SessionManager {
    */
   getStateSnapshot(app) {
     return {
+      version: this.schemaVersion,
       animationType: app.animationController.p5Sketch.currentAnimationType,
       patternSet: app.soundEngine.currentPatternSet,
       midiDeviceId: app.midiInput.selectedInput?.id || null,
+      activeSource: app.uiState.activeSource,
+      warningState: app.uiState.warningState,
       settings: {
         // Add any other relevant settings
       }
+    };
+  }
+
+  restoreState(state) {
+    if (!state || typeof state !== 'object') {
+      return this.getDefaultState();
+    }
+
+    const version = typeof state.version === 'string' ? state.version : '1.0.0';
+    if (!/^\d+\.\d+\.\d+$/.test(version)) {
+      return this.getDefaultState();
+    }
+
+    return {
+      version,
+      animationType: Number.isInteger(state.animationType) ? state.animationType : 0,
+      patternSet: typeof state.patternSet === 'string' ? state.patternSet : 'default',
+      midiDeviceId: typeof state.midiDeviceId === 'string' ? state.midiDeviceId : null,
+      activeSource: state.activeSource === 'midi' ? 'midi' : 'keyboard',
+      warningState: typeof state.warningState === 'string' ? state.warningState : 'none',
+      settings: state.settings && typeof state.settings === 'object' ? state.settings : {}
+    };
+  }
+
+  loadLastState() {
+    const sessions = this.getAllSessions();
+    if (sessions.length === 0) {
+      return null;
+    }
+
+    const last = sessions[sessions.length - 1];
+    if (!last || !last.state) {
+      return this.getDefaultState();
+    }
+
+    return this.restoreState(last.state);
+  }
+
+  getDefaultState() {
+    return {
+      version: this.schemaVersion,
+      animationType: 0,
+      patternSet: 'default',
+      midiDeviceId: null,
+      activeSource: 'keyboard',
+      warningState: 'none',
+      settings: {}
     };
   }
 }

@@ -58,6 +58,49 @@ export const KEYBOARD_CONFIG = {
   }
 };
 
+export const INPUT_SOURCE_TYPES = {
+  MIDI: 'midi',
+  KEYBOARD: 'keyboard'
+};
+
+let eventCounter = 0;
+
+export function createEventId() {
+  eventCounter += 1;
+  return `evt-${Date.now()}-${eventCounter}`;
+}
+
+export function isPlayableNote(note) {
+  return KEYBOARD_CONFIG.isInRange(note);
+}
+
+export function clampVelocity(velocity) {
+  return Math.max(0, Math.min(127, velocity));
+}
+
+export function createNormalizedNoteEvent({
+  sourceType,
+  phase,
+  note,
+  velocity,
+  channel = 0,
+  receivedAt = performance.now(),
+  meta = {}
+}) {
+  return {
+    eventId: createEventId(),
+    sourceType,
+    phase,
+    note,
+    velocity: clampVelocity(velocity),
+    channel,
+    receivedAt,
+    dispatchAt: performance.now(),
+    noteKey: `${sourceType}:${note}`,
+    meta
+  };
+}
+
 // Default MIDI CC assignments
 export const CC_CONFIG = {
   modWheel: 1,

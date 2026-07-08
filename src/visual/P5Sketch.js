@@ -13,6 +13,8 @@ export class P5Sketch {
     this.currentAnimationType = 0;
     this.backgroundColor = 0; // Black
     this.maxAnimations = 8; // Limit simultaneous animations
+    this.animationByKey = new Map();
+    this.creationOrder = [];
   }
 
   /**
@@ -27,19 +29,29 @@ export class P5Sketch {
         const width = window.innerWidth - 300; // Account for sidebar
         const height = window.innerHeight;
 
-        p.createCanvas(width, height);
-        p.colorMode(p.RGB);
+        p.createCanvas(width, height, p.WEBGL);
+        if (container) {
+          p.canvas.parent(container);
+          container.style.position = 'relative';
+        }
+
+        p.colorMode(p.HSB, 360, 100, 100, 255);
+        p.angleMode(p.DEGREES);
+        p.textAlign(p.LEFT, p.TOP);
+        p.noStroke();
       };
 
       p.draw = function () {
-        // White background
-        p.background(255);
+        p.background(220, 30, 10);
+        p.ambientLight(40, 40, 40);
+        p.directionalLight(200, 200, 255, 0.5, 0.5, -1);
+        p.pointLight(255, 255, 255, 0, 0, 200);
 
         // Update and draw animations
         self.updateAnimations(p);
         self.drawAnimations(p);
 
-        // Draw debug info
+        // Draw debug info on top
         self.drawDebugInfo(p);
       };
 
@@ -66,6 +78,10 @@ export class P5Sketch {
 
       // Remove finished animations
       if (anim.isFinished(now)) {
+        if (anim.noteKey) {
+          this.animationByKey.delete(anim.noteKey);
+          this.creationOrder = this.creationOrder.filter((key) => key !== anim.noteKey);
+        }
         toRemove.push(index);
       }
     });
@@ -89,19 +105,35 @@ export class P5Sketch {
    * Draw debug info
    */
   drawDebugInfo(p) {
-    p.fill(0);
+    p.push();
+    p.resetMatrix();
+    p.fill(0, 0, 100, 255);
     p.textSize(12);
     p.text(`FPS: ${Math.round(p.frameRate())}`, 10, 20);
     p.text(`Animations: ${this.animations.length}`, 10, 35);
+    p.pop();
   }
 
   /**
    * Trigger animation on MIDI note
    */
-  triggerAnimation(midiNote, velocity = 100) {
-    // Don't add if we're at max
+  triggerAnimation(midiNote, velocity = 100, noteKey = `note:${midiNote}`) {
+    const existing = this.animationByKey.get(noteKey);
+    if (existing) {
+      existing.startRelease();
+      this.animationByKey.delete(noteKey);
+      this.creationOrder = this.creationOrder.filter((key) => key !== noteKey);
+    }
+
     if (this.animations.length >= this.maxAnimations) {
-      return;
+      const oldestKey = this.creationOrder.shift();
+      if (oldestKey) {
+        const oldest = this.animationByKey.get(oldestKey);
+        if (oldest) {
+          oldest.startRelease();
+          this.animationByKey.delete(oldestKey);
+        }
+      }
     }
 
     const normalizedVelocity = Math.max(0, Math.min(1, velocity / 127));
@@ -112,8 +144,11 @@ export class P5Sketch {
       normalizedVelocity,
       this.p5Instance
     );
+    animation.noteKey = noteKey;
 
     this.animations.push(animation);
+    this.animationByKey.set(noteKey, animation);
+    this.creationOrder.push(noteKey);
   }
 
   /**
@@ -139,9 +174,15 @@ export class P5Sketch {
   /**
    * Stop note animation
    */
-  stopNote(midiNote) {
-    // Animations will fade out naturally with their lifecycle
-    // Could mark for immediate removal if needed
+  stopNote(midiNote, noteKey = `note:${midiNote}`) {
+    const animation = this.animationByKey.get(noteKey);
+    if (!animation) {
+      return;
+    }
+
+    animation.startRelease();
+    this.animationByKey.delete(noteKey);
+    this.creationOrder = this.creationOrder.filter((key) => key !== noteKey);
   }
 
   /**
@@ -149,6 +190,8 @@ export class P5Sketch {
    */
   clearAnimations() {
     this.animations = [];
+    this.animationByKey.clear();
+    this.creationOrder = [];
   }
 
   /**
@@ -183,6 +226,17 @@ class Animation {
     // Account for sustain pedal extending duration
     const effectiveDuration = this.duration * this.durationMultiplier;
     this.progress = Math.min(1, this.elapsed / effectiveDuration); // 0 to 1
+  }
+
+  startRelease() {
+    if (this.releasing) {
+      return;
+    }
+
+    this.releasing = true;
+    const elapsed = Date.now() - this.startTime;
+    const releaseWindow = 180;
+    this.duration = Math.min(this.duration, elapsed + releaseWindow);
   }
 
   draw(p) {
@@ -225,24 +279,34 @@ class RadiatingCircles extends Animation {
   }
 
   draw(p) {
-    const centerX = this.getCenterX(p);
-    const centerY = this.getCenterY(p);
     const alpha = this.getAlpha();
-    // Pitch bend controls stroke weight
-    const bendEffect = Math.abs(this.pitchBendModulation) * 4;
-    const radius = this.progress * this.maxRadius;
-    const strokeWeight = (2 + bendEffect) * (1 - this.progress);
+    const hue = (this.midiNote * 7) % 360;
+    const ringCount = 4 + Math.floor(this.modWheelIntensity * 4);
+    const radius = 100 + this.progress * this.maxRadius;
+    const rotation = this.progress * 180 + this.pitchBendModulation * 90;
 
-    p.stroke(0, alpha);
-    p.strokeWeight(Math.max(1, strokeWeight));
-    p.noFill();
+    p.push();
+    p.translate(0, 0, -200);
+    p.rotateY(rotation);
 
-    // Draw multiple circles - count affected by modulation
-    const circleCount = 2 + Math.floor(this.modWheelIntensity * 2);
-    for (let i = 0; i < circleCount; i++) {
-      const offset = (i * this.maxRadius / circleCount);
-      p.circle(centerX, centerY, radius + offset);
+    for (let i = 0; i < ringCount; i++) {
+      const ringRadius = radius * (1 + i * 0.15);
+      const sphereCount = 6 + i * 2;
+      for (let j = 0; j < sphereCount; j++) {
+        const angle = (360 / sphereCount) * j + this.progress * 120;
+        const x = Math.cos(angle) * ringRadius;
+        const y = Math.sin(angle) * ringRadius * 0.6;
+        const z = Math.sin(this.progress * 360 + angle) * 40;
+
+        p.push();
+        p.translate(x, y, z);
+        p.fill(hue, 90, 90, alpha);
+        p.sphere(12 * (1 - this.progress) + 4, 16, 16);
+        p.pop();
+      }
     }
+
+    p.pop();
   }
 }
 
@@ -255,9 +319,9 @@ class ParticleBurst extends Animation {
     this.duration = 1500;
     // Velocity controls particle count
     this.particleCount = 15 + Math.floor(velocity * 35);
-    this.centerX = null;
-    this.centerY = null;
-    this.particles = null;
+    this.centerX = 0;
+    this.centerY = 0;
+    this.particles = this.createParticles(this.centerX, this.centerY);
   }
 
   createParticles(centerX, centerY) {
@@ -270,38 +334,54 @@ class ParticleBurst extends Animation {
       particles.push({
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed,
+        vz: (Math.random() - 0.5) * speed * 0.5,
         x: centerX,
         y: centerY,
+        z: 0,
         size: 2 + Math.random() * 4
       });
     }
     return particles;
   }
 
+  update(p, now) {
+    super.update(p, now);
+    if (!Array.isArray(this.particles) || this.particles.length === 0) {
+      return;
+    }
+
+    const dt = Math.min(0.033, p.deltaTime / 1000 || 0.016);
+    const gravity = 80 + this.modWheelIntensity * 40;
+
+    this.particles.forEach((particle) => {
+      particle.vy += gravity * dt;
+      particle.x += particle.vx * dt;
+      particle.y += particle.vy * dt;
+      particle.z += particle.vz * dt;
+    });
+  }
+
   draw(p) {
-    // Initialize particles on first draw
-    if (this.particles === null) {
-      this.centerX = this.getCenterX(p);
-      this.centerY = this.getCenterY(p);
-      this.particles = this.createParticles(this.centerX, this.centerY);
+    if (!Array.isArray(this.particles) || this.particles.length === 0) {
+      return;
     }
 
     const alpha = this.getAlpha();
-    // Gravity affected by mod wheel
-    const gravity = 80 + this.modWheelIntensity * 40;
+    const hue = (this.midiNote * 5) % 360;
+    const sizeMultiplier = this.velocityModulation * 0.5 + 0.5;
 
-    p.fill(0, alpha);
-    p.noStroke();
+    p.push();
+    p.translate(0, 0, -200);
 
     this.particles.forEach((particle) => {
-      const elapsed = this.elapsed / 1000;
-      particle.y += particle.vy * elapsed + gravity * elapsed * elapsed * 0.5;
-      particle.x += particle.vx * elapsed;
-
-      // Size affected by velocity and modulation
-      const sizeMultiplier = this.velocityModulation * 0.5 + 0.5;
-      p.circle(particle.x, particle.y, particle.size * sizeMultiplier * (1 - this.progress));
+      p.push();
+      p.translate(particle.x, particle.y, particle.z);
+      p.fill(hue, 90, 90, alpha);
+      p.sphere(particle.size * sizeMultiplier * (1 - this.progress) + 2, 10, 10);
+      p.pop();
     });
+
+    p.pop();
   }
 }
 
@@ -318,39 +398,32 @@ class WavePattern extends Animation {
   }
 
   draw(p) {
-    const centerX = this.getCenterX(p);
-    const centerY = this.getCenterY(p);
     const alpha = this.getAlpha();
-    
-    // Pitch bend affects wave phase shift
-    const phaseShift = this.pitchBendModulation * Math.PI;
-    // Mod wheel affects line thickness
-    const thickness = 1 + this.modWheelIntensity * 3;
-    
-    p.stroke(0, alpha);
+    const hue = (this.midiNote * 4) % 360;
+    const phaseShift = this.pitchBendModulation * 45;
+    const thickness = 2 + this.modWheelIntensity * 4;
+
+    p.push();
+    p.translate(0, 0, -230);
+    p.rotateX(60);
+
+    p.stroke(hue, 100, 100, alpha);
     p.strokeWeight(thickness);
     p.noFill();
 
-    const points = 60;
+    const points = 80;
     p.beginShape();
 
     for (let i = 0; i < points; i++) {
-      const x = centerX - 150 + (i / points) * 300;
-      const wave = Math.sin(
-        (i / points) * Math.PI * 2 * this.frequency + 
-        this.progress * Math.PI * 4 + 
-        phaseShift
-      );
-      const y = centerY + wave * this.amplitude * (1 - this.progress);
-
-      if (i === 0) {
-        p.vertex(x, y);
-      } else {
-        p.curveVertex(x, y);
-      }
+      const angle = (i / points) * 360;
+      const x = Math.cos(angle + phaseShift) * 140;
+      const y = Math.sin(angle + phaseShift) * 40 * (1 - this.progress);
+      const z = Math.sin((i / points) * Math.PI * 4 + this.progress * 360) * this.amplitude * (1 - this.progress);
+      p.vertex(x, y, z);
     }
 
-    p.endShape();
+    p.endShape(p.CLOSE);
+    p.pop();
   }
 }
 
@@ -367,33 +440,29 @@ class ExpandingRectangles extends Animation {
   }
 
   draw(p) {
-    const centerX = this.getCenterX(p);
-    const centerY = this.getCenterY(p);
     const alpha = this.getAlpha();
-    
-    // Pitch bend controls rotation
-    const rotation = this.pitchBendModulation * Math.PI * 2 * this.progress;
-    // Mod wheel controls rectangle count
-    const rectCount = 2 + Math.floor(this.modWheelIntensity * 3);
-    const thickness = 1 + this.modWheelIntensity * 2;
-    
-    p.stroke(0, alpha);
+    const hue = (this.midiNote * 9) % 360;
+    const rotation = this.pitchBendModulation * 90 * this.progress;
+    const rectCount = 2 + Math.floor(this.modWheelIntensity * 4);
+    const thickness = 2 + this.modWheelIntensity * 3;
+
+    p.push();
+    p.translate(0, 0, -220);
+    p.rotateX(25 + this.progress * 15);
+    p.rotateY(rotation + this.progress * 45);
+
+    p.stroke(hue, 100, 100, alpha);
     p.strokeWeight(thickness);
     p.noFill();
-    
-    p.push();
-    p.translate(centerX, centerY);
-    p.rotate(rotation);
 
-    // Draw multiple rectangles
     for (let i = 0; i < rectCount; i++) {
-      const offset = (i * this.maxSize / rectCount);
-      const size = this.progress * this.maxSize + offset;
-
-      p.rectMode(p.CENTER);
-      p.rect(0, 0, size, size);
+      const size = this.progress * this.maxSize + i * 40;
+      p.push();
+      p.rotateY(i * 15);
+      p.box(size, size, 20);
+      p.pop();
     }
-    
+
     p.pop();
   }
 }

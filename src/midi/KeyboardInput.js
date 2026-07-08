@@ -1,58 +1,66 @@
 /**
  * KeyboardInput.js - Mac keyboard fallback when MIDI is unavailable
- * Maps Mac keyboard keys to MIDI notes (C4-B5 range, 60-71)
+ * Maps Mac keyboard keys to MIDI notes within playable range (C2-B4, 36-71)
  */
+
+import {
+  INPUT_SOURCE_TYPES,
+  createNormalizedNoteEvent,
+  isPlayableNote
+} from './MidiConfig.js';
 
 export class KeyboardInput {
   constructor() {
     this.eventListeners = {
       noteOn: [],
-      noteOff: []
+      noteOff: [],
+      normalizedNote: []
     };
     
-    // Map keyboard keys to MIDI notes
-    // Row 1: C4-G4 (60-67)
-    // Row 2: A4-E5 (69-76)
-    // Row 3: F#5-B5 (78-83)
+    // 3-octave map across alphanumeric rows.
     this.keyToNote = {
-      // QWERTY Row 1 (Z X C V B N M = C4 D4 E4 F4 G4 A4 B4)
-      'z': 60,  // C4
-      'x': 62,  // D4
-      'c': 64,  // E4
-      'v': 65,  // F4
-      'b': 67,  // G4
-      'n': 69,  // A4
-      'm': 71,  // B4
-      
-      // QWERTY Row 2 (A S D F G H J = C#4 D#4 F#4 G#4 A#4 B#4 C#5)
-      'a': 61,  // C#4
-      's': 63,  // D#4
-      'd': 66,  // F#4
-      'f': 68,  // G#4
-      'g': 70,  // A#4
-      'h': 72,  // C5
-      'j': 73,  // C#5
-      'k': 74,  // D5
-      'l': 75,  // D#5
-      
-      // QWERTY Row 3 (Q W E R T Y U I = C5 D5 E5 F5 G5 A5 B5 C6)
-      'q': 72,  // C5
-      'w': 74,  // D5
-      'e': 76,  // E5
-      'r': 77,  // F5
-      't': 79,  // G5
-      'y': 81,  // A5
-      'u': 83,  // B5
-      'i': 84,  // C6
-      
-      // Number row for octave modifiers
-      '1': 60,  // Octave 1 base
-      '2': 72,  // Octave 2 base
-      '3': 84   // Octave 3 base
+      'z': 36,  // C2
+      's': 37,
+      'x': 38,
+      'd': 39,
+      'c': 40,
+      'v': 41,
+      'g': 42,
+      'b': 43,
+      'h': 44,
+      'n': 45,
+      'j': 46,
+      'm': 47,
+
+      'q': 48,  // C3
+      '2': 49,
+      'w': 50,
+      '3': 51,
+      'e': 52,
+      'r': 53,
+      '5': 54,
+      't': 55,
+      '6': 56,
+      'y': 57,
+      '7': 58,
+      'u': 59,
+
+      'i': 60,  // C4
+      '9': 61,
+      'o': 62,
+      '0': 63,
+      'p': 64,
+      '[': 65,
+      '=': 66,
+      ']': 67,
+      '\\': 68,
+      ';': 69,
+      "'": 70,
+      '/': 71
     };
 
     this.activeNotes = new Set();
-    this.octaveOffset = 0; // Can be adjusted by number keys
+    this.enabled = true; // Disabled automatically when a MIDI device connects
   }
 
   /**
@@ -68,7 +76,36 @@ export class KeyboardInput {
   /**
    * Handle key down event
    */
+  enable() {
+    this.enabled = true;
+    console.log('Keyboard input enabled');
+  }
+
+  disable() {
+    this.enabled = false;
+    // Release any stuck notes
+    this.activeNotes.forEach((key) => {
+      const midiNote = this.keyToNote[key];
+      if (isPlayableNote(midiNote)) {
+        const noteOff = createNormalizedNoteEvent({
+          sourceType: INPUT_SOURCE_TYPES.KEYBOARD,
+          phase: 'noteOff',
+          note: midiNote,
+          velocity: 0,
+          channel: 0,
+          meta: { key, forced: true }
+        });
+        this.emit('normalizedNote', noteOff);
+        this.emit('noteOff', noteOff);
+      }
+    });
+    this.activeNotes.clear();
+    console.log('Keyboard input disabled (MIDI device active)');
+  }
+
   handleKeyDown(event) {
+    if (!this.enabled) return;
+
     const key = event.key.toLowerCase();
 
     // Ignore if modifier keys are pressed (Cmd, Ctrl, Alt, Shift)
@@ -82,16 +119,19 @@ export class KeyboardInput {
     }
 
     const midiNote = this.keyToNote[key];
-    if (midiNote !== undefined && !this.activeNotes.has(key)) {
+    if (isPlayableNote(midiNote) && !this.activeNotes.has(key)) {
       this.activeNotes.add(key);
       
-      // Use a fixed "velocity" for keyboard (100)
-      this.emit('noteOn', {
-        note: midiNote + this.octaveOffset,
+      const noteOn = createNormalizedNoteEvent({
+        sourceType: INPUT_SOURCE_TYPES.KEYBOARD,
+        phase: 'noteOn',
+        note: midiNote,
         velocity: 100,
         channel: 0,
-        source: 'keyboard'
+        meta: { key }
       });
+      this.emit('normalizedNote', noteOn);
+      this.emit('noteOn', noteOn);
 
       event.preventDefault();
     }
@@ -101,18 +141,24 @@ export class KeyboardInput {
    * Handle key up event
    */
   handleKeyUp(event) {
+    if (!this.enabled) return;
+
     const key = event.key.toLowerCase();
 
     const midiNote = this.keyToNote[key];
-    if (midiNote !== undefined && this.activeNotes.has(key)) {
+    if (isPlayableNote(midiNote) && this.activeNotes.has(key)) {
       this.activeNotes.delete(key);
 
-      this.emit('noteOff', {
-        note: midiNote + this.octaveOffset,
+      const noteOff = createNormalizedNoteEvent({
+        sourceType: INPUT_SOURCE_TYPES.KEYBOARD,
+        phase: 'noteOff',
+        note: midiNote,
         velocity: 0,
         channel: 0,
-        source: 'keyboard'
+        meta: { key }
       });
+      this.emit('normalizedNote', noteOff);
+      this.emit('noteOff', noteOff);
 
       event.preventDefault();
     }
@@ -173,8 +219,8 @@ export class KeyboardInput {
     const notes = [];
     this.activeNotes.forEach(key => {
       const midiNote = this.keyToNote[key];
-      if (midiNote !== undefined) {
-        notes.push(midiNote + this.octaveOffset);
+      if (isPlayableNote(midiNote)) {
+        notes.push(midiNote);
       }
     });
     return notes;
@@ -188,12 +234,19 @@ export class KeyboardInput {
     notesToStop.forEach(key => {
       const midiNote = this.keyToNote[key];
       this.activeNotes.delete(key);
-      this.emit('noteOff', {
-        note: midiNote + this.octaveOffset,
+      if (!isPlayableNote(midiNote)) {
+        return;
+      }
+      const noteOff = createNormalizedNoteEvent({
+        sourceType: INPUT_SOURCE_TYPES.KEYBOARD,
+        phase: 'noteOff',
+        note: midiNote,
         velocity: 0,
         channel: 0,
-        source: 'keyboard'
+        meta: { key, forced: true }
       });
+      this.emit('normalizedNote', noteOff);
+      this.emit('noteOff', noteOff);
     });
   }
 }
