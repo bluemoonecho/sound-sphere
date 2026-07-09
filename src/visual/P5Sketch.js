@@ -132,12 +132,12 @@ export class P5Sketch {
 
   getAnimationClass(type) {
     const AnimationTypes = {
-      0: GlyphBurst,
+      0: RingBurst,
       1: ScanlineRipple,
-      2: RetroVector,
-      3: LetterStamp,
+      2: SpinPolygon,
+      3: ShockImpact,
     };
-    return AnimationTypes[type] || GlyphBurst;
+    return AnimationTypes[type] || RingBurst;
   }
 
   setAnimationType(type) {
@@ -208,30 +208,32 @@ class Animation {
 }
 
 // ---------------------------------------------------------------------------
-// GlyphBurst — note-name letter at center, alphanumeric chars radiate outward
+// RingBurst — concentric rings expand outward, dot particles scatter radially
 // ---------------------------------------------------------------------------
-class GlyphBurst extends Animation {
+class RingBurst extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
     this.duration = 1600;
+    this.maxRadius = 220 + velocity * 140;
 
-    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
-    this.centralChar = noteLetters[midiNote % 12];
+    const ringCount = 4 + Math.floor(velocity * 4);
+    this.rings = [];
+    for (let r = 0; r < ringCount; r++) {
+      this.rings.push({
+        delay: (r / ringCount) * 0.35,
+        radiusMult: 0.28 + (r / ringCount) * 0.72,
+      });
+    }
 
-    const glyphPool = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#%&*+-=~<>?/|';
-    this.maxRadius = 200 + velocity * 160;
-    this.particleCount = 14 + Math.floor(velocity * 22);
-    this.particles = [];
-
-    for (let i = 0; i < this.particleCount; i++) {
-      const angle = (360 / this.particleCount) * i + (Math.random() - 0.5) * 20;
-      this.particles.push({
-        char: glyphPool[Math.floor(Math.random() * glyphPool.length)],
+    const dotCount = 12 + Math.floor(velocity * 20);
+    this.dots = [];
+    for (let d = 0; d < dotCount; d++) {
+      const angle = (360 / dotCount) * d + (Math.random() - 0.5) * 15;
+      this.dots.push({
         angle,
-        radiusFrac: 0.55 + Math.random() * 0.55,
-        spinRate: (Math.random() - 0.5) * 540,
-        spin: Math.random() * 360,
-        size: 12 + Math.random() * 20,
+        speed: 0.55 + Math.random() * 0.5,
+        size: 3 + Math.random() * 5 + velocity * 3,
+        delay: Math.random() * 0.12,
       });
     }
   }
@@ -239,45 +241,39 @@ class GlyphBurst extends Animation {
   draw(p) {
     const alpha = this.getAlpha();
 
-    // Central note-name character — large, bright, shrinks as it fades
-    p.push();
-    const centralSize = 90 * (1.5 - this.progress * 0.7);
-    p.textSize(centralSize);
-    p.textAlign(p.CENTER, p.CENTER);
-    p.fill(255, alpha);
-    p.noStroke();
-    p.text(this.centralChar, 0, 0);
-    p.pop();
-
-    // Register crosshair (fades early)
-    const crossAlpha = alpha * (1 - this.progress) * 0.4;
-    if (crossAlpha > 4) {
-      p.push();
-      const cr = 18 + this.progress * 36;
-      p.stroke(255, crossAlpha);
-      p.strokeWeight(1);
-      p.line(-cr, 0, cr, 0);
-      p.line(0, -cr, 0, cr);
-      p.pop();
+    // Central flash dot
+    const centerR = (7 + this.velocity * 9) * Math.max(0, 1 - this.progress * 3.5);
+    if (centerR > 0.5) {
+      p.fill(255, alpha);
+      p.noStroke();
+      p.circle(0, 0, centerR * 2);
     }
 
-    // Burst particles — alphanumeric glyphs scatter outward
-    this.particles.forEach((particle) => {
-      const eased = 1 - Math.pow(1 - this.progress, 2); // ease-out
-      const dist = eased * this.maxRadius * particle.radiusFrac;
-      const aRad = p.radians(particle.angle);
+    // Concentric expanding rings
+    this.rings.forEach((ring) => {
+      const rp = Math.max(0, (this.progress - ring.delay) / (1 - ring.delay));
+      if (rp <= 0) return;
+      const eased = 1 - Math.pow(1 - rp, 2);
+      const radius = eased * this.maxRadius * ring.radiusMult;
+      p.noFill();
+      p.stroke(255, alpha * (1 - eased * 0.55));
+      p.strokeWeight(1.5);
+      p.circle(0, 0, radius * 2);
+    });
+
+    // Dot particles radiating outward
+    this.dots.forEach((dot) => {
+      const dp = Math.max(0, (this.progress - dot.delay) / (1 - dot.delay));
+      if (dp <= 0) return;
+      const eased = 1 - Math.pow(1 - dp, 2);
+      const dist = eased * this.maxRadius * dot.speed;
+      const aRad = p.radians(dot.angle);
       const x = Math.cos(aRad) * dist;
       const y = Math.sin(aRad) * dist;
-
-      p.push();
-      p.translate(x, y);
-      p.rotate(particle.spin + this.progress * particle.spinRate);
-      p.textSize(particle.size * (1 - this.progress * 0.45));
-      p.textAlign(p.CENTER, p.CENTER);
-      p.fill(210, alpha * (1 - this.progress * 0.25));
+      const dotSize = dot.size * (1 - dp * 0.5);
+      p.fill(255, alpha * (1 - dp * 0.3));
       p.noStroke();
-      p.text(particle.char, 0, 0);
-      p.pop();
+      p.circle(x, y, dotSize);
     });
   }
 }
@@ -345,36 +341,24 @@ class ScanlineRipple extends Animation {
 }
 
 // ---------------------------------------------------------------------------
-// RetroVector — expanding wireframe polygons with letter chars at vertices
+// SpinPolygon — nested wireframe polygons spin and expand; dot markers at vertices
 // ---------------------------------------------------------------------------
-class RetroVector extends Animation {
+class SpinPolygon extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
     this.duration = 1700;
-    this.maxSize = 190 + velocity * 200;
+    this.maxSize = 200 + velocity * 180;
 
-    const glyphs = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
-    this.noteChar = noteLetters[midiNote % 12];
-
-    const shapeCount = 2 + Math.floor(velocity * 2);
-    this.shapes = [];
-    for (let s = 0; s < shapeCount; s++) {
-      const sides = 3 + Math.floor(Math.random() * 5); // 3–7 sided polygon
-      const verts = [];
-      for (let v = 0; v < sides; v++) {
-        verts.push({
-          angle: (360 / sides) * v + s * 27,
-          char:
-            s === 0 && v === 0
-              ? this.noteChar
-              : glyphs[Math.floor(Math.random() * glyphs.length)],
-        });
-      }
-      this.shapes.push({
-        verts,
-        spinRate: (Math.random() - 0.5) * 110,
-        radiusMult: 0.45 + s * 0.55,
+    const polyCount = 3 + Math.floor(velocity * 3);
+    this.polygons = [];
+    for (let i = 0; i < polyCount; i++) {
+      this.polygons.push({
+        sides: 3 + i,          // triangle → square → pentagon → hexagon…
+        spinDir: i % 2 === 0 ? 1 : -1,
+        spinSpeed: 22 + Math.random() * 32,
+        radiusMult: (i + 1) / polyCount,
+        startAngle: (360 / (3 + i)) * Math.random(),
+        weight: Math.max(1, 2.5 - i * 0.4),
       });
     }
   }
@@ -382,136 +366,113 @@ class RetroVector extends Animation {
   draw(p) {
     const alpha = this.getAlpha();
 
-    this.shapes.forEach((shape) => {
+    this.polygons.forEach((poly, idx) => {
       const eased = 1 - Math.pow(1 - this.progress, 1.5);
-      const radius = eased * this.maxSize * shape.radiusMult;
-      const spin = this.progress * shape.spinRate;
+      const radius = eased * this.maxSize * poly.radiusMult;
+      const spin = poly.startAngle + this.progress * poly.spinSpeed * poly.spinDir;
 
       p.push();
       p.noFill();
-      p.stroke(255, alpha);
-      p.strokeWeight(1.5);
+      p.stroke(255, alpha * (1 - idx * 0.07));
+      p.strokeWeight(poly.weight);
 
-      // Wireframe polygon
       p.beginShape();
-      shape.verts.forEach((vert) => {
-        const a = p.radians(vert.angle + spin);
+      for (let v = 0; v < poly.sides; v++) {
+        const a = p.radians((360 / poly.sides) * v + spin);
         p.vertex(Math.cos(a) * radius, Math.sin(a) * radius);
-      });
+      }
       p.endShape(p.CLOSE);
 
-      // Letter at each vertex
-      shape.verts.forEach((vert) => {
-        const a = p.radians(vert.angle + spin);
-        const vx = Math.cos(a) * radius;
-        const vy = Math.sin(a) * radius;
-
-        p.push();
-        p.translate(vx, vy);
-        p.rotate(vert.angle + spin);
-        p.textSize(11 + (1 - this.progress) * 6);
-        p.textAlign(p.CENTER, p.CENTER);
-        p.fill(255, alpha);
-        p.noStroke();
-        p.text(vert.char, 0, 0);
-        p.pop();
-      });
+      // Small filled dot at each vertex
+      p.fill(255, alpha * 0.85);
+      p.noStroke();
+      for (let v = 0; v < poly.sides; v++) {
+        const a = p.radians((360 / poly.sides) * v + spin);
+        p.circle(Math.cos(a) * radius, Math.sin(a) * radius, 5);
+      }
       p.pop();
     });
-
-    // Origin crosshair
-    const cAlpha = alpha * (1 - this.progress) * 0.5;
-    if (cAlpha > 4) {
-      p.push();
-      p.stroke(255, cAlpha);
-      p.strokeWeight(1);
-      p.line(-14, 0, 14, 0);
-      p.line(0, -14, 0, 14);
-      p.pop();
-    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// LetterStamp — large note-name letter drops from above and impacts center
+// ShockImpact — diamond shape drops and impacts; concentric rings + shape fragments scatter
 // ---------------------------------------------------------------------------
-class LetterStamp extends Animation {
+class ShockImpact extends Animation {
   constructor(midiNote, velocity, p5Instance) {
     super(midiNote, velocity, p5Instance);
     this.duration = 1300;
+    this.impactSize = 55 + velocity * 55;
 
-    const noteLetters = ['C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B'];
-    this.letter = noteLetters[midiNote % 12];
-
-    const fragChars = '|/\\-+*.:_=!~#@';
-    const fragCount = 8 + Math.floor(velocity * 14);
+    const fragCount = 10 + Math.floor(velocity * 16);
     this.fragments = [];
     for (let i = 0; i < fragCount; i++) {
-      const angle = (360 / fragCount) * i + (Math.random() - 0.5) * 30;
+      const angle = (360 / fragCount) * i + (Math.random() - 0.5) * 25;
       this.fragments.push({
-        char: fragChars[i % fragChars.length],
         angle,
-        speed: 55 + Math.random() * 130 * velocity,
-        size: 8 + Math.random() * 13,
+        speed: 65 + Math.random() * 120 * velocity,
+        size: 3 + Math.random() * 6,
+        spin: Math.random() * 360,
+        spinRate: (Math.random() - 0.5) * 360,
+        isDiamond: Math.random() > 0.4, // 60% diamonds, 40% squares
       });
     }
-    this.letterSize = 120 + velocity * 70;
   }
 
   draw(p) {
     const alpha = this.getAlpha();
-    const landingPoint = 0.38;
+    const landingPoint = 0.3;
 
-    // Accelerating drop: starts above, arrives at center at landingPoint
+    // Drop from above, ease-in (accelerate)
     const dropRaw = Math.min(1, this.progress / landingPoint);
-    const easeIn = dropRaw * dropRaw; // ease-in (accelerate into center)
-    const startY = -p.height * 0.52;
-    const stampY = startY * (1 - easeIn);
+    const impactY = -p.height * 0.5 * (1 - dropRaw * dropRaw);
 
     // Post-impact squash/stretch
     const postImpact = Math.max(0, (this.progress - landingPoint) / (1 - landingPoint));
-    const squash = 1 + Math.sin(postImpact * Math.PI) * 0.22;
-    const stretch = 2 - squash;
-    const displaySize = this.letterSize * (1 - this.progress * 0.55);
+    const squashX = 1 + Math.sin(postImpact * Math.PI) * 0.3;
+    const squashY = 1 / squashX;
+    const displaySize = this.impactSize * (1 - this.progress * 0.5);
 
+    // Falling diamond (rotated square)
     p.push();
-    p.translate(0, stampY);
-    p.scale(squash, stretch);
-    p.textSize(displaySize);
-    p.textAlign(p.CENTER, p.CENTER);
-    p.fill(255, alpha);
-    p.noStroke();
-    p.text(this.letter, 0, 0);
+    p.translate(0, impactY);
+    p.scale(squashX, squashY);
+    p.rotate(45);
+    p.noFill();
+    p.stroke(255, alpha);
+    p.strokeWeight(2.5);
+    p.rect(-displaySize / 2, -displaySize / 2, displaySize, displaySize);
     p.pop();
 
     if (this.progress > landingPoint) {
       const ringProg = (this.progress - landingPoint) / (1 - landingPoint);
-      const ringR = ringProg * (90 + this.velocity * 90);
 
-      p.push();
-      p.noFill();
-      p.stroke(255, alpha * (1 - ringProg));
-      p.strokeWeight(2);
-      p.circle(0, 0, ringR * 2);
+      // Staggered concentric circles
+      for (let r = 0; r < 3; r++) {
+        const rp = Math.max(0, ringProg - r * 0.1);
+        if (rp <= 0) continue;
+        const ringR = rp * (70 + this.velocity * 80 + r * 35);
+        p.noFill();
+        p.stroke(255, alpha * (1 - rp) * (1 - r * 0.15));
+        p.strokeWeight(2 - r * 0.35);
+        p.circle(0, 0, ringR * 2);
+      }
 
-      // Typographic fragment scatter
+      // Geometric fragment scatter (squares and diamonds)
       this.fragments.forEach((frag) => {
         const dist = ringProg * frag.speed;
         const aRad = p.radians(frag.angle);
-        const fx = Math.cos(aRad) * dist;
-        const fy = Math.sin(aRad) * dist;
+        const fragAlpha = alpha * (1 - ringProg * 0.65);
+        const fragSize = frag.size * (1 - ringProg * 0.4);
 
         p.push();
-        p.translate(fx, fy);
-        p.rotate(frag.angle + ringProg * 180);
-        p.textSize(frag.size);
-        p.textAlign(p.CENTER, p.CENTER);
-        p.fill(220, alpha * (1 - ringProg * 0.65));
+        p.translate(Math.cos(aRad) * dist, Math.sin(aRad) * dist);
+        p.rotate(frag.spin + ringProg * frag.spinRate + (frag.isDiamond ? 45 : 0));
+        p.fill(255, fragAlpha);
         p.noStroke();
-        p.text(frag.char, 0, 0);
+        p.rect(-fragSize / 2, -fragSize / 2, fragSize, fragSize);
         p.pop();
       });
-      p.pop();
     }
   }
 }
