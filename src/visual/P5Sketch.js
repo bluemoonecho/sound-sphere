@@ -37,7 +37,10 @@ export class P5Sketch {
       };
 
       p.draw = function () {
-        p.background(12); // near-black
+        // Partial fade instead of full clear — creates motion afterglow/trails
+        p.fill(12, 38);
+        p.noStroke();
+        p.rect(0, 0, p.width, p.height);
 
         self.updateAnimations(p);
         self.drawAnimations(p);
@@ -78,7 +81,12 @@ export class P5Sketch {
   drawAnimations(p) {
     this.animations.forEach((anim) => {
       p.push();
-      p.translate(p.width / 2, p.height / 2); // center the origin for all animations
+      // Spatial mapping: low pitch → bottom-left, high pitch → top-right
+      const notePos = anim.notePosition ?? 0.5;
+      const spread = 0.3;
+      const xOffset = (notePos - 0.5) * spread * p.width;
+      const yOffset = (0.5 - notePos) * spread * p.height; // inverted: high = up
+      p.translate(p.width / 2 + xOffset, p.height / 2 + yOffset);
       anim.draw(p);
       p.pop();
     });
@@ -86,8 +94,10 @@ export class P5Sketch {
 
   drawDebugInfo(p) {
     p.push();
-    p.fill(255, 90);
+    p.fill(12); // solid bg prevents trail ghosting on changing numbers
     p.noStroke();
+    p.rect(0, 0, 130, 42);
+    p.fill(255, 90);
     p.textSize(11);
     p.textAlign(p.LEFT, p.TOP);
     p.text(`FPS: ${Math.round(p.frameRate())}`, 10, 10);
@@ -115,15 +125,18 @@ export class P5Sketch {
     }
 
     const normalizedVelocity = Math.max(0, Math.min(1, velocity / 127));
-    // In auto mode (-1), type is determined by the note itself (cycles 0-3 per semitone).
-    // In manual mode (0-3), the selected type overrides.
+    // Auto mode: type determined by octave — low=RingBurst, mid=Scanline, high=SpinPolygon, out-of-range=ShockImpact
     const animType = this.currentAnimationType >= 0
       ? this.currentAnimationType
-      : midiNote % 4;
+      : Math.max(0, Math.min(3, Math.floor((midiNote - 36) / 12)));
     const animationClass = this.getAnimationClass(animType);
+
+    // Normalized pitch position for spatial canvas mapping (0=lowest, 1=highest in 3-octave range)
+    const notePosition = Math.max(0, Math.min(1, (midiNote - 36) / 35));
 
     const animation = new animationClass(midiNote, normalizedVelocity, this.p5Instance);
     animation.noteKey = noteKey;
+    animation.notePosition = notePosition;
 
     this.animations.push(animation);
     this.animationByKey.set(noteKey, animation);
@@ -205,6 +218,11 @@ class Animation {
     }
     return 255 * (0.7 + this.modWheelIntensity * 0.3);
   }
+
+  // Velocity → brightness: soft notes dim gray, hard notes bright white
+  getColor() {
+    return Math.round(140 + this.velocity * 115);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -240,11 +258,12 @@ class RingBurst extends Animation {
 
   draw(p) {
     const alpha = this.getAlpha();
+    const c = this.getColor();
 
     // Central flash dot
     const centerR = (7 + this.velocity * 9) * Math.max(0, 1 - this.progress * 3.5);
     if (centerR > 0.5) {
-      p.fill(255, alpha);
+      p.fill(c, alpha);
       p.noStroke();
       p.circle(0, 0, centerR * 2);
     }
@@ -256,7 +275,7 @@ class RingBurst extends Animation {
       const eased = 1 - Math.pow(1 - rp, 2);
       const radius = eased * this.maxRadius * ring.radiusMult;
       p.noFill();
-      p.stroke(255, alpha * (1 - eased * 0.55));
+      p.stroke(c, alpha * (1 - eased * 0.55));
       p.strokeWeight(1.5);
       p.circle(0, 0, radius * 2);
     });
@@ -271,7 +290,7 @@ class RingBurst extends Animation {
       const x = Math.cos(aRad) * dist;
       const y = Math.sin(aRad) * dist;
       const dotSize = dot.size * (1 - dp * 0.5);
-      p.fill(255, alpha * (1 - dp * 0.3));
+      p.fill(c, alpha * (1 - dp * 0.3));
       p.noStroke();
       p.circle(x, y, dotSize);
     });
@@ -292,6 +311,7 @@ class ScanlineRipple extends Animation {
 
   draw(p) {
     const alpha = this.getAlpha();
+    const c = this.getColor();
     const spread = this.progress * this.maxSpread;
 
     p.push();
@@ -317,13 +337,13 @@ class ScanlineRipple extends Animation {
         (p.width * 0.48) * (1 - distFrac * 0.38) * Math.min(1, this.progress * 3.5);
       const weight = Math.max(0.5, 1.8 * (1 - distFrac));
 
-      p.stroke(200, lineAlpha);
+      p.stroke(Math.round(c * 0.8), lineAlpha);
       p.strokeWeight(weight);
       p.line(-halfLen, y, halfLen, y);
     }
 
     // Bright center hot-spot line
-    p.stroke(255, alpha * (1 - this.progress * 0.25));
+    p.stroke(c, alpha * (1 - this.progress * 0.25));
     p.strokeWeight(2.5);
     const hotLen = p.width * 0.44 * Math.min(1, this.progress * 5);
     p.line(-hotLen, 0, hotLen, 0);
@@ -331,7 +351,7 @@ class ScanlineRipple extends Animation {
     // Edge tick marks (CRT raster framing)
     const tickAlpha = alpha * (1 - this.progress) * 0.5;
     if (tickAlpha > 4) {
-      p.stroke(255, tickAlpha);
+      p.stroke(c, tickAlpha);
       p.strokeWeight(1);
       p.line(-hotLen, -5, -hotLen, 5);
       p.line(hotLen, -5, hotLen, 5);
@@ -365,6 +385,7 @@ class SpinPolygon extends Animation {
 
   draw(p) {
     const alpha = this.getAlpha();
+    const c = this.getColor();
 
     this.polygons.forEach((poly, idx) => {
       const eased = 1 - Math.pow(1 - this.progress, 1.5);
@@ -373,7 +394,7 @@ class SpinPolygon extends Animation {
 
       p.push();
       p.noFill();
-      p.stroke(255, alpha * (1 - idx * 0.07));
+      p.stroke(c, alpha * (1 - idx * 0.07));
       p.strokeWeight(poly.weight);
 
       p.beginShape();
@@ -384,7 +405,7 @@ class SpinPolygon extends Animation {
       p.endShape(p.CLOSE);
 
       // Small filled dot at each vertex
-      p.fill(255, alpha * 0.85);
+      p.fill(c, alpha * 0.85);
       p.noStroke();
       for (let v = 0; v < poly.sides; v++) {
         const a = p.radians((360 / poly.sides) * v + spin);
@@ -433,13 +454,15 @@ class ShockImpact extends Animation {
     const squashY = 1 / squashX;
     const displaySize = this.impactSize * (1 - this.progress * 0.5);
 
+    const c = this.getColor();
+
     // Falling diamond (rotated square)
     p.push();
     p.translate(0, impactY);
     p.scale(squashX, squashY);
     p.rotate(45);
     p.noFill();
-    p.stroke(255, alpha);
+    p.stroke(c, alpha);
     p.strokeWeight(2.5);
     p.rect(-displaySize / 2, -displaySize / 2, displaySize, displaySize);
     p.pop();
@@ -453,7 +476,7 @@ class ShockImpact extends Animation {
         if (rp <= 0) continue;
         const ringR = rp * (70 + this.velocity * 80 + r * 35);
         p.noFill();
-        p.stroke(255, alpha * (1 - rp) * (1 - r * 0.15));
+        p.stroke(c, alpha * (1 - rp) * (1 - r * 0.15));
         p.strokeWeight(2 - r * 0.35);
         p.circle(0, 0, ringR * 2);
       }
@@ -468,7 +491,7 @@ class ShockImpact extends Animation {
         p.push();
         p.translate(Math.cos(aRad) * dist, Math.sin(aRad) * dist);
         p.rotate(frag.spin + ringProg * frag.spinRate + (frag.isDiamond ? 45 : 0));
-        p.fill(255, fragAlpha);
+        p.fill(c, fragAlpha);
         p.noStroke();
         p.rect(-fragSize / 2, -fragSize / 2, fragSize, fragSize);
         p.pop();
