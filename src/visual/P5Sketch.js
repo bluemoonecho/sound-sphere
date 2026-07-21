@@ -14,6 +14,7 @@ export class P5Sketch {
     this.maxAnimations = 8;
     this.animationByKey = new Map();
     this.creationOrder = [];
+    this.synthInfo = null;
   }
 
   init() {
@@ -96,12 +97,18 @@ export class P5Sketch {
     p.push();
     p.fill(12); // solid bg prevents trail ghosting on changing numbers
     p.noStroke();
-    p.rect(0, 0, 130, 42);
+    p.rect(0, 0, 190, this.synthInfo ? 86 : 42);
     p.fill(255, 90);
     p.textSize(11);
     p.textAlign(p.LEFT, p.TOP);
     p.text(`FPS: ${Math.round(p.frameRate())}`, 10, 10);
     p.text(`Animations: ${this.animations.length}`, 10, 24);
+    if (this.synthInfo) {
+      p.textSize(10);
+      p.fill(170, 230, 255);
+      p.text(`Wave: ${this.synthInfo.waveform}`, 10, 38);
+      p.text(`ADSR: ${this.synthInfo.attack.toFixed(3)} / ${this.synthInfo.decay.toFixed(3)} / ${this.synthInfo.sustain.toFixed(2)} / ${this.synthInfo.release.toFixed(3)}`, 10, 54);
+    }
     p.pop();
   }
 
@@ -173,6 +180,10 @@ export class P5Sketch {
 
   getP5() {
     return this.p5Instance;
+  }
+
+  setSynthInfo(info) {
+    this.synthInfo = info;
   }
 }
 

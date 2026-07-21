@@ -126,6 +126,71 @@ body {
   padding-right: 24px;
 }
 
+.synth-panel {
+  margin-top: 10px;
+}
+
+.waveform-selects {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.synth-sliders {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.slider-group label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: #999;
+}
+
+.slider-group input[type="range"] {
+  width: 100%;
+  margin-bottom: 4px;
+  accent-color: #7be9ff;
+}
+
+.slider-value {
+  font-size: 10px;
+  color: #7be9ff;
+  text-align: right;
+  letter-spacing: 0.5px;
+}
+
+.slider-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.slider-group label {
+  margin-bottom: 6px;
+  font-size: 10px;
+  color: #999;
+}
+
+.slider-group input[type="range"] {
+  width: 100%;
+  margin-bottom: 4px;
+  accent-color: #7be9ff;
+}
+
+.slider-value {
+  font-size: 10px;
+  color: #7be9ff;
+  text-align: right;
+  letter-spacing: 0.5px;
+}
+
 .control-group select:hover,
 .control-group button:hover {
   background: #181818;

@@ -12,6 +12,13 @@ export class StrudelEngine {
     this.currentPatternSet = 'default';
     this.masterGain = null;
     this.masterFilter = null;
+    this.waveform = 'sine';
+    this.envelope = {
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.3,
+      release: 0.2
+    };
   }
 
   /**
@@ -211,59 +218,49 @@ export class StrudelEngine {
     try {
       const ctx = this.audioContext;
       const now = ctx.currentTime;
-      
-      // Create oscillators for main tone + harmonics
-      const oscillators = [];
-      const gains = [];
-      
-      // Main oscillator
-      const mainOsc = ctx.createOscillator();
-      mainOsc.type = pattern.waveform;
-      mainOsc.frequency.value = pattern.frequency;
-      oscillators.push(mainOsc);
-      
-      // Harmonic oscillators with reduced amplitude
-      pattern.harmonics.slice(1).forEach((harmonic, index) => {
-        const harmOsc = ctx.createOscillator();
-        harmOsc.type = pattern.waveform;
-        harmOsc.frequency.value = pattern.frequency * harmonic;
-        
-        const harmGain = ctx.createGain();
-        harmGain.gain.value = 0.1 * (1 - index * 0.2); // Decrease higher harmonics
-        harmOsc.connect(harmGain);
-        
-        oscillators.push(harmOsc);
-        gains.push(harmGain);
-      });
-      
+
       // Create filter for dynamic tone shaping
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
       filter.frequency.value = pattern.filterFreqBase;
       filter.Q.value = pattern.filterQ;
-      
+
+      const oscillators = [];
+      const waveformType = this.waveform || pattern.waveform;
+
+      const mainOsc = ctx.createOscillator();
+      mainOsc.type = waveformType;
+      mainOsc.frequency.value = pattern.frequency;
+      mainOsc.connect(filter);
+      oscillators.push(mainOsc);
+
+      // Harmonic support for richness
+      pattern.harmonics.slice(1).forEach((harmonic) => {
+        const level = 0.08;
+        const harmOsc = ctx.createOscillator();
+        harmOsc.type = waveformType;
+        harmOsc.frequency.value = pattern.frequency * harmonic;
+        const harmGain = ctx.createGain();
+        harmGain.gain.value = level;
+        harmOsc.connect(harmGain);
+        harmGain.connect(filter);
+        oscillators.push(harmOsc);
+      });
+
       // Create gain for ADSR envelope
       const gain = ctx.createGain();
       gain.gain.setValueAtTime(0, now);
-      
-      // Connect main oscillator through gain
-      const mainGain = ctx.createGain();
-      mainOsc.connect(mainGain);
-      mainGain.connect(filter);
-      
-      // Connect harmonic gains to filter
-      gains.forEach(g => g.connect(filter));
-      
+
       // Connect filter to master chain
       filter.connect(gain);
       gain.connect(this.masterFilter);
       
       // Apply ADSR envelope with velocity sensitivity
       const velocityGain = normalizedVelocity * 0.35;
-      const attackTime = pattern.attack * (1 - normalizedVelocity * 0.3); // Faster for harder hits
-      const decayTime = pattern.decay;
-      const sustainGain = pattern.sustain * normalizedVelocity;
-      const releaseTime = pattern.release;
+      const attackTime = this.envelope.attack * (1 - normalizedVelocity * 0.3);
+      const decayTime = this.envelope.decay;
+      const sustainGain = this.envelope.sustain * normalizedVelocity;
+      const releaseTime = this.envelope.release;
       
       // Attack phase
       gain.gain.linearRampToValueAtTime(velocityGain, now + attackTime);
@@ -291,8 +288,7 @@ export class StrudelEngine {
       
       // Track active synth
       this.activeSynths.set(midiNote, {
-        mainOsc,
-        harmOscs: oscillators.slice(1),
+        oscillators,
         gain,
         filter,
         velocity: normalizedVelocity,
@@ -320,8 +316,7 @@ export class StrudelEngine {
         
         // Quick fade out
         synth.gain.gain.linearRampToValueAtTime(0, now + releaseTime);
-        synth.mainOsc.stop(now + releaseTime + 0.05);
-        synth.harmOscs.forEach(osc => osc.stop(now + releaseTime + 0.05));
+        synth.oscillators.forEach(osc => osc.stop(now + releaseTime + 0.05));
       } catch (error) {
         console.error(`Error stopping note ${midiNote}:`, error);
       }
@@ -348,12 +343,8 @@ export class StrudelEngine {
         const ctx = this.audioContext;
         const now = ctx.currentTime;
         
-        // Smooth frequency transition (0.05s)
-        synth.mainOsc.frequency.linearRampToValueAtTime(newFreq, now + 0.05);
-        
-        // Update harmonics
-        synth.harmOscs.forEach((osc, index) => {
-          const harmonic = pattern.harmonics[index + 1];
+        synth.oscillators.forEach((osc, index) => {
+          const harmonic = index === 0 ? 1 : pattern.harmonics[index];
           osc.frequency.linearRampToValueAtTime(newFreq * harmonic, now + 0.05);
         });
       } catch (error) {
@@ -366,6 +357,24 @@ export class StrudelEngine {
     this.activeSynths.forEach((_, midiNote) => {
       this.applyPitchBend(midiNote, bendValue);
     });
+  }
+
+  setWaveform(waveform) {
+    if (!waveform || typeof waveform !== 'string') {
+      return;
+    }
+    this.waveform = waveform;
+  }
+
+  setEnvelopeParam(param, value) {
+    if (!['attack', 'decay', 'sustain', 'release'].includes(param)) {
+      return;
+    }
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) {
+      return;
+    }
+    this.envelope[param] = numeric;
   }
 
   /**

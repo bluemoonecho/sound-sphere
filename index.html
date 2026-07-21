@@ -33,6 +33,36 @@
             <option value="3">Shock Impact</option>
           </select>
         </div>
+        <div class="control-group synth-panel">
+          <label for="waveform-select">Synth Waveform:</label>
+          <select id="waveform-select">
+            <option value="sine">Sine</option>
+            <option value="triangle">Triangle</option>
+            <option value="square">Square</option>
+          </select>
+        </div>
+        <div class="synth-sliders">
+          <div class="control-group slider-group">
+            <label for="attack-range">Attack</label>
+            <input id="attack-range" type="range" min="0.001" max="0.2" step="0.001" value="0.01" />
+            <div class="slider-value" id="attack-value">0.010</div>
+          </div>
+          <div class="control-group slider-group">
+            <label for="decay-range">Decay</label>
+            <input id="decay-range" type="range" min="0.01" max="0.6" step="0.01" value="0.10" />
+            <div class="slider-value" id="decay-value">0.100</div>
+          </div>
+          <div class="control-group slider-group">
+            <label for="sustain-range">Sustain</label>
+            <input id="sustain-range" type="range" min="0" max="1" step="0.01" value="0.30" />
+            <div class="slider-value" id="sustain-value">0.30</div>
+          </div>
+          <div class="control-group slider-group">
+            <label for="release-range">Release</label>
+            <input id="release-range" type="range" min="0.05" max="1" step="0.01" value="0.20" />
+            <div class="slider-value" id="release-value">0.20</div>
+          </div>
+        </div>
         <div class="control-group">
           <button id="save-session">Save Session</button>
           <button id="load-session">Load Session</button>

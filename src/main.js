@@ -35,6 +35,14 @@ class SoundSphere {
       midiSelected: false
     };
 
+    this.synthControls = {
+      waveform: 'sine',
+      attack: 0.01,
+      decay: 0.1,
+      sustain: 0.3,
+      release: 0.2
+    };
+
     this.performanceStats = {
       samples: 0,
       averageLatencyMs: 0,
@@ -65,6 +73,7 @@ class SoundSphere {
       this.p5Sketch.init();
 
       this.setupUI();
+      this.setupSynthControls();
       this.setupInputListeners();
       this.setupKeyboardShortcuts();
       this.loadLastSession();
@@ -109,6 +118,98 @@ class SoundSphere {
     if (clearBtn) {
       clearBtn.addEventListener('click', () => this.clearSession());
     }
+  }
+
+  updateSynthOverlay() {
+    if (this.p5Sketch && typeof this.p5Sketch.setSynthInfo === 'function') {
+      this.p5Sketch.setSynthInfo({
+        waveform: this.synthControls.waveform,
+        attack: this.synthControls.attack,
+        decay: this.synthControls.decay,
+        sustain: this.synthControls.sustain,
+        release: this.synthControls.release
+      });
+    }
+  }
+
+  setupSynthControls() {
+    const waveformSelect = document.getElementById('waveform-select');
+    const attackRange = document.getElementById('attack-range');
+    const decayRange = document.getElementById('decay-range');
+    const sustainRange = document.getElementById('sustain-range');
+    const releaseRange = document.getElementById('release-range');
+
+    const attackValue = document.getElementById('attack-value');
+    const decayValue = document.getElementById('decay-value');
+    const sustainValue = document.getElementById('sustain-value');
+    const releaseValue = document.getElementById('release-value');
+
+    const updateDisplay = (element, value) => {
+      if (element) {
+        element.textContent = Number(value).toFixed(3).replace(/0+$/, '').replace(/\.$/, '') || Number(value).toFixed(3);
+      }
+    };
+
+    const handleControlChange = (name, value) => {
+      if (name === 'waveform') {
+        this.synthControls.waveform = value;
+        this.soundEngine.setWaveform(value);
+      } else {
+        this.synthControls[name] = Number(value);
+        this.soundEngine.setEnvelopeParam(name, Number(value));
+      }
+      this.updateSynthOverlay();
+    };
+
+    if (waveformSelect) {
+      waveformSelect.value = this.synthControls.waveform;
+      waveformSelect.addEventListener('change', (e) => {
+        handleControlChange('waveform', e.target.value);
+      });
+    }
+
+    if (attackRange) {
+      attackRange.value = String(this.synthControls.attack);
+      attackRange.addEventListener('input', (e) => {
+        handleControlChange('attack', e.target.value);
+        updateDisplay(attackValue, e.target.value);
+      });
+      updateDisplay(attackValue, attackRange.value);
+    }
+
+    if (decayRange) {
+      decayRange.value = String(this.synthControls.decay);
+      decayRange.addEventListener('input', (e) => {
+        handleControlChange('decay', e.target.value);
+        updateDisplay(decayValue, e.target.value);
+      });
+      updateDisplay(decayValue, decayRange.value);
+    }
+
+    if (sustainRange) {
+      sustainRange.value = String(this.synthControls.sustain);
+      sustainRange.addEventListener('input', (e) => {
+        handleControlChange('sustain', e.target.value);
+        updateDisplay(sustainValue, e.target.value);
+      });
+      updateDisplay(sustainValue, sustainRange.value);
+    }
+
+    if (releaseRange) {
+      releaseRange.value = String(this.synthControls.release);
+      releaseRange.addEventListener('input', (e) => {
+        handleControlChange('release', e.target.value);
+        updateDisplay(releaseValue, e.target.value);
+      });
+      updateDisplay(releaseValue, releaseRange.value);
+    }
+
+    this.soundEngine.setWaveform(this.synthControls.waveform);
+    this.soundEngine.setEnvelopeParam('attack', this.synthControls.attack);
+    this.soundEngine.setEnvelopeParam('decay', this.synthControls.decay);
+    this.soundEngine.setEnvelopeParam('sustain', this.synthControls.sustain);
+    this.soundEngine.setEnvelopeParam('release', this.synthControls.release);
+    this.updateSynthOverlay();
   }
 
   setupInputListeners() {
